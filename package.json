@@ -2,13 +2,14 @@
   "name": "3d-snake-game",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "build": "npm run build:copy-public && npm run build:copy-root && npm run build:copy-audio && npm run build:tailwind && npm run build:esbuild",
     "build:copy-public": "npx copyfiles -u 1 public/**/* dist",
-    "build:copy-root": "npx copyfiles ads.txt app-ads.txt dist",
+    "build:copy-root": "npx copyfiles pi.txt dist",
     "build:copy-audio": "npx copyfiles -u 1 audio/**/* dist/audio",
     "build:tailwind": "npx tailwindcss -i ./styles.css -o ./dist/styles.css --minify",
-    "build:esbuild": "npx esbuild index.tsx --bundle --outfile=dist/bundle.js --minify --sourcemap"
+    "build:esbuild": "node build.mjs"
   },
   "dependencies": {
     "firebase": "^10.12.2",
