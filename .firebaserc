@@ -1,5 +1,6 @@
 {
   "projects": {
+    "default": "d-snake-7a80a",
     "snake": "d-snake-7a80a"
   },
   "targets": {},
