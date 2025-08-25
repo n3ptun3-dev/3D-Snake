@@ -1,0 +1,6 @@
+{
+  "name": "3D Snake",
+  "description": "The classic snake game, now in 3D and from the snake's point of view. Built with React and three.js. ",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
