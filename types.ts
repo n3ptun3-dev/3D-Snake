@@ -1,6 +1,8 @@
 
 
 
+
+
 export type GraphicsQuality = 'High' | 'Medium' | 'Low';
 
 export type Point3D = { x: number; y: number; z: number };
@@ -90,7 +92,7 @@ export type BuildingDetails = {
   x: number;
   z: number;
   height: number;
-  type: 'regular' | 'pi-tower' | 'skyscraper-quantum' | 'transmission-tower' | 'searchlight-tower';
+  type: 'regular' | 'snake-tower' | 'skyscraper-quantum' | 'transmission-tower' | 'searchlight-tower';
   roofType: 'flat' | 'apex' | 'slanted' | 'pyramid';
 };
 

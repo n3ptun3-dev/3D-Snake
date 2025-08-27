@@ -241,12 +241,12 @@ export const generateLayoutDetails = (): LayoutDetails => {
         }
     }
 
-    const skyscraperPlacements = new Map<number, 'pi' | 'quantum'>();
+    const skyscraperPlacements = new Map<number, 'snake' | 'quantum'>();
     const availableForSkyscraper = Array.from(Array(perimeterBlocks.length).keys());
     if (availableForSkyscraper.length > 1) {
       for (let i = availableForSkyscraper.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [availableForSkyscraper[i], availableForSkyscraper[j]] = [availableForSkyscraper[j], availableForSkyscraper[i]]; }
       const index1 = availableForSkyscraper.pop()!;
-      skyscraperPlacements.set(index1, 'pi');
+      skyscraperPlacements.set(index1, 'snake');
       const pos1 = perimeterBlocks[index1];
       const secondIndexPosition = availableForSkyscraper.findIndex(idx => { const pos2 = perimeterBlocks[idx]; return Math.abs(pos1.x - pos2.x) + Math.abs(pos1.z - pos2.z) > 1; });
       let index2;
@@ -262,7 +262,7 @@ export const generateLayoutDetails = (): LayoutDetails => {
         let building: BuildingDetails;
         if (skyscraperPlacements.has(index)) {
             const variant = skyscraperPlacements.get(index)!;
-            building = { x: pos.x, z: pos.z, height: 6, type: variant === 'pi' ? 'pi-tower' : 'skyscraper-quantum', roofType: 'flat' };
+            building = { x: pos.x, z: pos.z, height: 6, type: variant === 'snake' ? 'snake-tower' : 'skyscraper-quantum', roofType: 'flat' };
         } else if (index === searchlightTowerIndex) {
             building = { x: pos.x, z: pos.z, height: 4, type: 'searchlight-tower', roofType: 'flat' };
         } else if (towerIndices.has(index)) {
