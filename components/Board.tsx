@@ -5,31 +5,45 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-import { CameraView, Point3D, GameState, Fruit, FruitType, Portal, PortalType, LayoutDetails, BillboardDetails, StreetPassageDetails, FlyerDetails, BannerDetails, ApprovedAd, AdType, BillboardData, LeaderboardEntry, BuildingDetails, GraphicsQuality } from '../types';
-import { COLORS, FULL_BOARD_WIDTH, FULL_BOARD_DEPTH, FRUIT_COLORS } from '../constants';
+import { CameraView, Point3D, GameState, Fruit, FruitType, LayoutDetails, BillboardDetails, StreetPassageDetails, FlyerDetails, BannerDetails, ApprovedAd, BillboardData, LeaderboardEntry, BuildingDetails, GraphicsQuality, LightEventType, LightEventData, ActiveEffect, AdType } from '../types';
+import { COLORS, FULL_BOARD_WIDTH, FULL_BOARD_DEPTH, FRUIT_COLORS, FRUIT_CATEGORIES } from '../constants';
 import { isWall, isStreetPassageBlock, getPortalAbsolutePosition } from './gameLogic';
 import { reportDisplayedAds } from '../utils/sponsors';
+import { LightingSystem } from './lightingSystem';
 
 interface BoardProps {
   gameState: GameState;
   zoom: number;
   cameraView: CameraView;
+  lastGameplayView: CameraView;
   snakeSegments: Point3D[];
   snakeRotation: number;
+  visualRotation: number;
   fruits: Fruit[];
+  clearingFruits: { fruit: Fruit; startTime: number }[];
   gameSpeed: number;
   layoutDetails: LayoutDetails;
   isCrashing: boolean;
+  isPaused: boolean;
   isPassageFruitActive: boolean;
   passageFruitLocation: Point3D | null;
   approvedAds: ApprovedAd[];
   billboardData: BillboardData | null;
   graphicsQuality: GraphicsQuality;
   isPageVisible: boolean;
+  weather: 'Clear' | 'Rain';
+  score: number;
+  level: number;
+  activeEffects: ActiveEffect[];
+  crashOutcome: 'respawn' | 'gameOver' | null;
+  onCrashAnimationComplete: () => void;
+  onGameOverAnimationComplete: () => void;
+  nextSnake: Point3D[] | null;
 }
 
 export interface BoardRef {
   handleResize: () => void;
+  triggerLightEvent: (type: LightEventType, data: LightEventData) => void;
 }
 
 // The layer number for the bloom effect.
@@ -101,10 +115,6 @@ const addNeonBorderToBanner = (bannerMesh: THREE.Mesh, state: any) => {
     borderGroup.name = "neonBorder";
     const randomNeonColor = NEON_PALETTE[Math.floor(Math.random() * NEON_PALETTE.length)];
     
-    // --- NEON BORDER GLOW FIX ---
-    // Switched from MeshStandardMaterial to MeshBasicMaterial.
-    // MeshBasicMaterial with a bright color on the BLOOM_LAYER is the correct
-    // and most reliable way to create a simple bloom effect, matching the billboard border.
     const borderMat = new THREE.MeshBasicMaterial({
         color: randomNeonColor,
     });
@@ -148,7 +158,21 @@ const createGlowTexture = (color: string): THREE.CanvasTexture => {
   return new THREE.CanvasTexture(canvas);
 };
 
-const createPortalTexture = (type: PortalType): THREE.CanvasTexture => {
+const createShadowTexture = (): THREE.CanvasTexture => {
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext('2d')!;
+    const gradient = context.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0.3, 'rgba(255, 255, 255, 0.7)');
+    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, size, size);
+    return new THREE.CanvasTexture(canvas);
+};
+
+const createPortalTexture = (type: 'Red' | 'Blue'): THREE.CanvasTexture => {
     const canvas = document.createElement('canvas');
     const size = 128;
     canvas.width = size;
@@ -330,7 +354,6 @@ const createFlyerTexture = (variant: number): THREE.CanvasTexture => {
     return texture;
 };
 
-
 const createLabelTexture = (text: string): THREE.CanvasTexture => {
     const size = 128;
     const canvas = document.createElement('canvas');
@@ -497,17 +520,11 @@ const createQuantumRooftopIcon = (state: any): THREE.Group => {
     state.materialsToDispose.push(standMat);
     const standMesh = new THREE.Mesh(standGeo, standMat);
     
-    // This is the group that will be added to the building and rotated.
-    // It contains both the stand and the icon, positioned relative to each other.
     const assemblyGroup = new THREE.Group();
     const standHeight = 0.4;
 
-    // Position stand so its base is at the group's origin
     standMesh.position.y = standHeight / 2;
-    
-    // Position icon on top of the stand
     iconGroup.position.y = standHeight + (outerRadius * 0.33);
-    
     assemblyGroup.add(standMesh, iconGroup);
 
     return assemblyGroup;
@@ -521,14 +538,12 @@ const createScoreSlideTexture = (title: string, entries: LeaderboardEntry[], uni
     canvas.height = height;
     const ctx = canvas.getContext('2d')!;
 
-    // Background
     const gradient = ctx.createLinearGradient(0, 0, 0, height);
     gradient.addColorStop(0, '#1a2a3a');
     gradient.addColorStop(1, '#101827');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
     
-    // Title
     ctx.font = 'bold 36px "sans-serif"';
     ctx.fillStyle = '#facc15'; // yellow-400
     ctx.textAlign = 'center';
@@ -538,7 +553,6 @@ const createScoreSlideTexture = (title: string, entries: LeaderboardEntry[], uni
     ctx.fillText(title, width / 2, 45);
     ctx.shadowColor = 'transparent';
 
-    // Entries
     ctx.font = '24px "sans-serif"';
     ctx.textAlign = 'left';
 
@@ -546,17 +560,14 @@ const createScoreSlideTexture = (title: string, entries: LeaderboardEntry[], uni
         const y = 95 + index * 45;
         const rank = index + 1;
         
-        // Rank
         ctx.fillStyle = rank === 1 ? '#fde047' : rank === 2 ? '#e5e7eb' : rank === 3 ? '#f97316' : '#d1d5db'; // gold, silver, bronze
         ctx.font = 'bold 28px "sans-serif"';
         ctx.fillText(`${rank}.`, 40, y);
         
-        // Name
         ctx.font = '24px "sans-serif"';
         ctx.fillStyle = '#fff';
         ctx.fillText(entry.name.substring(0, 15), 80, y);
         
-        // Score/Speed
         ctx.textAlign = 'right';
         const value = unit === 'points' ? entry.score.toLocaleString() : `${entry.speed.toFixed(2)} m/s`;
         ctx.fillText(value, width - 40, y);
@@ -568,13 +579,9 @@ const createScoreSlideTexture = (title: string, entries: LeaderboardEntry[], uni
     return texture;
 };
 
-/**
- * Calculates the 3D position and rotation for a banner or flyer on a wall.
- * This is a shared utility function to ensure consistent placement logic.
- */
 const getWallAttachmentDetails = (
     wall: 'N' | 'S' | 'E' | 'W',
-    position: number, // The grid coordinate (0-19) along the playable edge
+    position: number,
     isAlcoveSpot: boolean,
     isStreetIsland: boolean,
 ): { position: THREE.Vector3, rotation: THREE.Euler } | null => {
@@ -584,7 +591,6 @@ const getWallAttachmentDetails = (
     let targetWallCell: { x: number, z: number };
 
     if (isStreetIsland) {
-        // These ads face the main board from inside the street passage
         switch (wall) {
             case 'N': targetWallCell = { x: posOnGrid, z: 2 }; adjacentPlayableCell = { x: posOnGrid, z: 3 }; break;
             case 'S': targetWallCell = { x: posOnGrid, z: FULL_BOARD_DEPTH - 3 }; adjacentPlayableCell = { x: posOnGrid, z: FULL_BOARD_DEPTH - 4 }; break;
@@ -592,7 +598,6 @@ const getWallAttachmentDetails = (
             case 'E': targetWallCell = { x: FULL_BOARD_WIDTH - 3, z: posOnGrid }; adjacentPlayableCell = { x: FULL_BOARD_WIDTH - 4, z: posOnGrid }; break;
         }
     } else if (isAlcoveSpot) {
-        // These ads face into the alcove
          switch (wall) {
             case 'N': targetWallCell = { x: posOnGrid, z: 1 }; adjacentPlayableCell = { x: posOnGrid, z: 2 }; break;
             case 'S': targetWallCell = { x: posOnGrid, z: FULL_BOARD_DEPTH - 2 }; adjacentPlayableCell = { x: posOnGrid, z: FULL_BOARD_DEPTH - 3 }; break;
@@ -600,7 +605,6 @@ const getWallAttachmentDetails = (
             case 'E': targetWallCell = { x: FULL_BOARD_WIDTH - 2, z: posOnGrid }; adjacentPlayableCell = { x: FULL_BOARD_WIDTH - 3, z: posOnGrid }; break;
         }
     } else {
-        // Standard ads on the inner perimeter facing the playable area
         switch (wall) {
             case 'N': adjacentPlayableCell = { x: posOnGrid, z: WALL_THICKNESS }; targetWallCell = { x: posOnGrid, z: WALL_THICKNESS - 1 }; break;
             case 'S': adjacentPlayableCell = { x: posOnGrid, z: FULL_BOARD_DEPTH - 1 - WALL_THICKNESS }; targetWallCell = { x: posOnGrid, z: FULL_BOARD_DEPTH - WALL_THICKNESS }; break;
@@ -611,44 +615,25 @@ const getWallAttachmentDetails = (
 
     const worldPos = new THREE.Vector3(targetWallCell.x + offsetX, 0, targetWallCell.z + offsetZ);
     const rot = new THREE.Euler(0, 0, 0);
-    const offset = 0.5 + 0.02; // half building width + z-fight offset
+    const offset = 0.5 + 0.02;
 
     const dx = adjacentPlayableCell.x - targetWallCell.x;
     const dz = adjacentPlayableCell.z - targetWallCell.z;
 
-    // This logic determines the rotation for a PlaneGeometry to face TOWARDS the playable area from the wall.
-    if (dz === 1) { worldPos.z += offset; rot.y = 0; }      // From N wall (low z), face +z
-    else if (dz === -1) { worldPos.z -= offset; rot.y = Math.PI; } // From S wall (high z), face -z
-    else if (dx === 1) { worldPos.x += offset; rot.y = -Math.PI / 2; }   // From W wall (low x), face +x
-    else if (dx === -1) { worldPos.x -= offset; rot.y = Math.PI / 2; }  // From E wall (high x), face -x
+    if (dz === 1) { worldPos.z += offset; rot.y = 0; }
+    else if (dz === -1) { worldPos.z -= offset; rot.y = Math.PI; }
+    else if (dx === 1) { worldPos.x += offset; rot.y = -Math.PI / 2; }
+    else if (dx === -1) { worldPos.x -= offset; rot.y = Math.PI / 2; }
     
     return { position: worldPos, rotation: rot };
 };
 
-/**
- * A specialized version of getWallAttachmentDetails for flyers, which use a floating point position.
- */
 const getFlyerAttachmentDetails = (flyer: FlyerDetails): { position: THREE.Vector3, rotation: THREE.Euler } | null => {
-    // Get the base grid cell and the offset within that cell
-    const baseGridPosition = Math.floor(flyer.position);
-    const positionOffset = flyer.position - baseGridPosition;
-
-    // Use the shared logic to get the attachment details for the base grid cell
-    const attachment = getWallAttachmentDetails(flyer.wall, baseGridPosition, !!flyer.isAlcoveSpot, !!flyer.isStreetIsland);
-    if (!attachment) return null;
-
-    // Apply the floating-point offset along the wall's direction
-    if (flyer.wall === 'N' || flyer.wall === 'S') {
-        attachment.position.x += positionOffset;
-    } else { // E or W
-        attachment.position.z += positionOffset;
-    }
-
-    return attachment;
+    return getWallAttachmentDetails(flyer.wall, flyer.position, !!flyer.isAlcoveSpot, !!flyer.isStreetIsland);
 };
 
 
-const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, snakeSegments, snakeRotation, fruits, gameSpeed, layoutDetails, isCrashing, isPassageFruitActive, passageFruitLocation, approvedAds, billboardData, graphicsQuality, isPageVisible }, ref) => {
+const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, lastGameplayView, snakeSegments, snakeRotation, visualRotation, fruits, clearingFruits, gameSpeed, layoutDetails, isCrashing, isPaused, isPassageFruitActive, passageFruitLocation, approvedAds, billboardData, graphicsQuality, isPageVisible, weather, score, level, activeEffects, crashOutcome, onCrashAnimationComplete, onGameOverAnimationComplete, nextSnake }, ref) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const [isSceneInitialized, setIsSceneInitialized] = useState(false);
 
@@ -660,9 +645,12 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
     scene?: THREE.Scene;
     snakeHead?: THREE.Mesh;
     snakeBody?: THREE.InstancedMesh;
+    snakeTail?: THREE.Mesh;
     dummy?: THREE.Object3D;
     glowPlanes?: THREE.Mesh[];
     fruitMeshes?: Map<number, THREE.Mesh>;
+    appleGlows?: Map<number, THREE.Mesh>;
+    fruitShadows?: Map<number, THREE.Mesh>;
     fruitGeometries?: Map<FruitType, THREE.BufferGeometry>;
     fruitMaterials?: Map<FruitType, THREE.Material>;
     layoutGroup?: THREE.Group;
@@ -686,6 +674,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
     gameState: GameState;
     isPassageFruitActive: boolean;
     isCrashing: boolean;
+    isPaused: boolean;
     orbitStartTime?: number;
     startAnim?: {
         startTime: number;
@@ -695,12 +684,34 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
         endPos: THREE.Vector3;
         endLookAt: THREE.Vector3;
     };
+    crashAnim?: {
+        phase: 'shake' | 'ascending';
+        startTime: number;
+        shakeDuration: number;
+        ascendDuration: number;
+        startPos: THREE.Vector3;
+        startQuat: THREE.Quaternion;
+        crashedSnakePos: THREE.Vector3;
+        ascendPos: THREE.Vector3;
+        ascendQuat: THREE.Quaternion;
+    };
+    gameOverAnim?: {
+        startTime: number;
+        duration: number;
+        startPos: THREE.Vector3;
+        startQuat: THREE.Quaternion;
+        endPos: THREE.Vector3;
+        endQuat: THREE.Quaternion;
+    };
     
     currentSnakeSegments: Point3D[];
     prevSnakeSegments: Point3D[];
     currentSnakeRotation: number;
     prevSnakeRotation: number;
     
+    visualRotation: number;
+    fpvCameraQuaternion?: THREE.Quaternion;
+    previousCameraView?: CameraView;
     lastTickTime: number;
 
     geometriesToDispose: THREE.BufferGeometry[];
@@ -729,10 +740,17 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
         lookAtHelper: THREE.Vector3;
         droneForward: THREE.Vector3;
         droneUp: THREE.Vector3;
+        appleGlowMaterial?: THREE.Material;
+        appleGlowGeo?: THREE.PlaneGeometry;
+        shadowTexture?: THREE.CanvasTexture;
+        shadowGeo?: THREE.PlaneGeometry;
+        boardInstance?: THREE.InstancedMesh;
+        tempColor: THREE.Color;
     };
     interpolatedPositions?: THREE.Vector3[];
-    crashEffect?: { startTime: number };
     fruits: Fruit[];
+    clearingFruits: { fruit: Fruit; startTime: number }[];
+    activeEffects: ActiveEffect[];
     bloomPass?: UnrealBloomPass;
     billboardScreen?: THREE.Mesh;
     lastBillboardUpdate?: number;
@@ -763,6 +781,20 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
         stuckDuration: number;
     };
     graphicsQuality: GraphicsQuality;
+    lightingSystem?: LightingSystem;
+    buildingEdgesMesh?: THREE.InstancedMesh;
+    buildingEdgePositions?: THREE.Vector3[];
+    weather: 'Clear' | 'Rain';
+    score: number;
+    level: number;
+    rainSystem?: THREE.Points;
+    dustSystem?: THREE.Points;
+    roofMeshes?: THREE.Mesh[];
+    originalMaterialProperties?: {
+        board: { roughness: number, metalness: number };
+        roofs: { roughness: number, metalness: number }[];
+    };
+    fog?: THREE.FogExp2;
   }>({
     isInitialRender: true,
     gameSpeed: 500,
@@ -770,11 +802,13 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
     gameState: 'Loading',
     isPassageFruitActive: false,
     isCrashing: false,
+    isPaused: false,
     
     currentSnakeSegments: [],
     prevSnakeSegments: [],
     currentSnakeRotation: 0,
     prevSnakeRotation: 0,
+    visualRotation: 0,
 
     lastTickTime: 0,
 
@@ -784,6 +818,8 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
     towerLights: [],
     rotatingIcons: [],
     fruits: [],
+    clearingFruits: [],
+    activeEffects: [],
     drones: [],
     droneTargets: [],
     searchlightBeams: [],
@@ -792,6 +828,9 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
     maxBuildingHeight: 10,
     wallRunCycleIndex: 0,
     graphicsQuality: 'Medium',
+    weather: 'Clear',
+    score: 0,
+    level: 1,
   });
 
   const handleResize = useCallback(() => {
@@ -810,58 +849,92 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
 
   useImperativeHandle(ref, () => ({
     handleResize,
+    triggerLightEvent: (type: LightEventType, data: LightEventData) => {
+        animationRef.current.lightingSystem?.triggerEvent(type, data);
+    }
   }), [handleResize]);
   
-  // This useEffect updates the animation state from props. It's the bridge from React to Three.js loop.
   useEffect(() => {
     const state = animationRef.current;
     state.gameSpeed = gameSpeed;
     state.cameraView = cameraView;
     state.fruits = fruits;
+    state.clearingFruits = clearingFruits;
+    state.activeEffects = activeEffects;
     state.isPassageFruitActive = isPassageFruitActive;
     state.gameState = gameState;
+    state.isPaused = isPaused;
+    state.isCrashing = isCrashing;
     state.layoutDetails = layoutDetails;
+    state.visualRotation = visualRotation;
     state.graphicsQuality = graphicsQuality;
+    state.weather = weather;
+    state.score = score;
+    state.level = level;
 
     if (state.currentSnakeSegments !== snakeSegments || state.currentSnakeRotation !== snakeRotation) {
         state.prevSnakeSegments = state.isInitialRender ? snakeSegments : state.currentSnakeSegments;
         state.currentSnakeSegments = snakeSegments;
         state.prevSnakeRotation = state.isInitialRender ? snakeRotation : state.currentSnakeRotation;
         state.currentSnakeRotation = snakeRotation;
-        state.lastTickTime = performance.now();
+        state.lastTickTime = Date.now();
         if (state.isInitialRender) state.isInitialRender = false;
     }
-    
-    if (isCrashing && !state.isCrashing) {
-        state.crashEffect = { startTime: performance.now() };
-        state.isCrashing = true;
-    } else if (!isCrashing && state.isCrashing) {
-        state.crashEffect = undefined;
-        state.isCrashing = false;
-    }
-  }, [gameSpeed, cameraView, snakeSegments, snakeRotation, isCrashing, fruits, isPassageFruitActive, gameState, layoutDetails, graphicsQuality]);
+  }, [gameSpeed, cameraView, snakeSegments, snakeRotation, visualRotation, isCrashing, isPaused, fruits, clearingFruits, activeEffects, isPassageFruitActive, gameState, layoutDetails, graphicsQuality, weather, score, level]);
 
-  // This useEffect handles the fly-in animation when the game starts.
   useEffect(() => {
       const state = animationRef.current;
-      if (gameState === 'Starting' && snakeSegments.length > 0 && state.camera) {
-          state.startAnim = undefined; // Clear any previous animation state
+      if (gameState === 'Starting' && snakeSegments.length > 0 && state.camera && state.reusable) {
+          // FIX: Reset the FPV camera's internal rotation state when the fly-in
+          // animation begins. This prevents the camera from "looking around" as it
+          // slerps from its old (crashed) orientation to the new forward-facing one.
+          if (state.fpvCameraQuaternion) {
+            state.fpvCameraQuaternion.set(0, 0, 0, 1); // Reset to identity quaternion
+          }
+          
+          state.startAnim = undefined;
           
           const head = snakeSegments[0];
           const headPos = new THREE.Vector3(head.x + offsetX, head.y, head.z + offsetZ);
           
-          // Final destination: FPV
-          const endLookAtDir = new THREE.Vector3(0, 0, -1);
-          const endPos = new THREE.Vector3().copy(headPos).addScaledVector(endLookAtDir, 0.4);
-          const endLookAt = new THREE.Vector3().copy(headPos).add(endLookAtDir);
+          let endPos: THREE.Vector3;
+          let endLookAt: THREE.Vector3;
           
-          // Starting point: current camera position and orientation
+          // NEW LOGIC: Determine animation target based on the preferred gameplay view.
+          if (lastGameplayView === CameraView.THIRD_PERSON) {
+              // Calculate third-person camera position for the start of the game.
+              // The initial snake rotation is 0, so its quaternion is identity.
+              const initialQuaternion = new THREE.Quaternion(); 
+              
+              // Use the same offsets as the in-game third-person camera for a seamless transition.
+              const idealOffset = new THREE.Vector3(0, 1.2, 2.5);
+              idealOffset.applyQuaternion(initialQuaternion);
+              endPos = new THREE.Vector3().copy(headPos).add(idealOffset);
+              
+              const idealLookAtOffset = new THREE.Vector3(0, 0, -5);
+              idealLookAtOffset.applyQuaternion(initialQuaternion);
+              endLookAt = new THREE.Vector3().copy(headPos).add(idealLookAtOffset);
+
+              // FIX: Pre-set the lookAt helper to prevent a camera jump after respawn animation.
+              // When the 'Starting' animation ends, the 'Playing' state's third-person
+              // camera logic takes over. This ensures its lookAt target starts in the correct
+              // position, avoiding a jarring `lerp` from its previous (pre-crash) state.
+              if (state.reusable?.lookAtHelper) {
+                  state.reusable.lookAtHelper.copy(endLookAt);
+              }
+
+          } else { // Default to FIRST_PERSON
+              // Original logic for first-person view.
+              const endLookAtDir = new THREE.Vector3(0, 0, -1);
+              endPos = new THREE.Vector3().copy(headPos).addScaledVector(endLookAtDir, 0.4);
+              endLookAt = new THREE.Vector3().copy(headPos).add(endLookAtDir);
+          }
+          
           const startPos = state.camera.position.clone();
           const startQuat = state.camera.quaternion.clone();
 
-          // Animation will begin after a 1s delay and last 3s.
           state.startAnim = {
-              startTime: performance.now() + 1000,
+              startTime: Date.now() + 1000,
               duration: 3000,
               startPos,
               startQuat,
@@ -869,9 +942,49 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
               endLookAt,
           };
       }
-  }, [gameState, snakeSegments]);
+  }, [gameState, snakeSegments, lastGameplayView]);
 
-  // This useEffect controls the animation loop based on page visibility.
+  useEffect(() => {
+      const state = animationRef.current;
+      if (gameState === 'Crashed' && !state.crashAnim && state.camera && state.reusable) {
+          const crashedSnakePos = new THREE.Vector3(snakeSegments[0].x + offsetX, snakeSegments[0].y, snakeSegments[0].z + offsetZ);
+          const ascendPos = crashedSnakePos.clone();
+          ascendPos.y = 20;
+
+          state.crashAnim = {
+              phase: 'shake',
+              startTime: Date.now(),
+              shakeDuration: 1500,
+              ascendDuration: 2000,
+              startPos: state.camera.position.clone(),
+              startQuat: state.camera.quaternion.clone(),
+              crashedSnakePos,
+              ascendPos,
+              ascendQuat: new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(ascendPos, crashedSnakePos, new THREE.Vector3(0, 1, 0))),
+          };
+      }
+  }, [gameState, crashOutcome, nextSnake, snakeSegments, onCrashAnimationComplete]);
+
+  useEffect(() => {
+    const state = animationRef.current;
+    if (gameState === 'GameOver' && !state.crashAnim && !state.gameOverAnim && state.camera) {
+        const firstOrbitPoint = new THREE.Vector3(18, 8, 0);
+        const targetLookAt = new THREE.Vector3(0, 2, 0);
+        const targetQuat = new THREE.Quaternion().setFromRotationMatrix(
+            new THREE.Matrix4().lookAt(firstOrbitPoint, targetLookAt, new THREE.Vector3(0, 1, 0))
+        );
+
+        state.gameOverAnim = {
+            startTime: Date.now(),
+            duration: 2000,
+            startPos: state.camera.position.clone(),
+            startQuat: state.camera.quaternion.clone(),
+            endPos: firstOrbitPoint,
+            endQuat: targetQuat,
+        };
+    }
+  }, [gameState]);
+
   useEffect(() => {
     const state = animationRef.current;
     if (isPageVisible) {
@@ -886,7 +999,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
     }
   }, [isPageVisible]);
 
-  // This useEffect runs once to initialize the Three.js scene, renderer, camera, etc.
   useEffect(() => {
     const currentMount = mountRef.current;
     if (!currentMount) {
@@ -904,12 +1016,21 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
             const height = currentMount.clientHeight;
             
             animState.fruitMeshes = new Map();
+            animState.appleGlows = new Map();
+            animState.fruitShadows = new Map();
+            animState.fpvCameraQuaternion = new THREE.Quaternion();
+            animState.previousCameraView = animState.cameraView;
+            animState.roofMeshes = [];
             
             const scene = new THREE.Scene();
             animState.scene = scene;
     
             const skyColor = 0x294a66;
             scene.background = new THREE.Color(skyColor);
+
+            const fog = new THREE.FogExp2(skyColor, 0.015);
+            scene.fog = fog;
+            animState.fog = fog;
     
             const skyGeometry = new THREE.SphereGeometry(500, 32, 16);
             const skyMaterial = new THREE.MeshBasicMaterial({ color: skyColor, side: THREE.BackSide });
@@ -966,6 +1087,11 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                     lookAtHelper: new THREE.Vector3(),
                     droneForward: new THREE.Vector3(),
                     droneUp: new THREE.Vector3(),
+                    appleGlowMaterial: undefined,
+                    shadowTexture: undefined,
+                    shadowGeo: undefined,
+                    boardInstance: undefined,
+                    tempColor: new THREE.Color(),
                 };
             }
             animState.reusable.backgroundCylinder = backgroundCylinder;
@@ -1008,7 +1134,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
             directionalLight.shadow.mapSize.width = 1024;
             directionalLight.shadow.mapSize.height = 1024;
             directionalLight.shadow.bias = -0.0001;
-            // Set a tight frustum for better shadow performance
             directionalLight.shadow.camera.left = -15;
             directionalLight.shadow.camera.right = 15;
             directionalLight.shadow.camera.top = 15;
@@ -1021,7 +1146,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
             const droneAltitudes = [5, 8];
             const droneColors = [new THREE.Color(0xff4400), new THREE.Color(0x00aaff)];
             animState.drones = [];
-            // Initialize droneTargets with full DroneState objects to prevent undefined errors
             animState.droneTargets = [
                 { state: undefined },
                 { state: undefined }
@@ -1039,10 +1163,10 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                         altitude: droneAltitudes[i],
                         currentPosition: startPos.clone(),
                         targetPosition: new THREE.Vector3((Math.random() - 0.5) * 20, droneAltitudes[i], (Math.random() - 0.5) * 20),
-                        startTime: performance.now(),
+                        startTime: Date.now(),
                         duration: 8000 + Math.random() * 4000
                     };
-                } else { // For drone 0 (red), initialize its state properly
+                } else { 
                     (animState.droneTargets[0] as { state: DroneState }).state = chooseNextDroneAction(animState, drone.group.position.clone(), drone.group.quaternion.clone());
                 }
             }
@@ -1058,8 +1182,8 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
     
             const bloomLayer = new THREE.Layers();
             bloomLayer.set(BLOOM_LAYER);
-            const headGeo = new THREE.SphereGeometry(0.2, 16, 16);
-            const headMat = new THREE.MeshStandardMaterial({ color: COLORS.PLAYER_FRONT, emissive: COLORS.PLAYER_FRONT, emissiveIntensity: 0.8 });
+            const headGeo = new THREE.SphereGeometry(0.18, 16, 16);
+            const headMat = new THREE.MeshStandardMaterial({ color: COLORS.PLAYER_FRONT, emissive: COLORS.PLAYER_FRONT, emissiveIntensity: 0.4 });
             const snakeHead = new THREE.Mesh(headGeo, headMat);
             snakeHead.layers.enable(BLOOM_LAYER);
             scene.add(snakeHead);
@@ -1068,21 +1192,38 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
             const maxSegments = FULL_BOARD_WIDTH * FULL_BOARD_DEPTH;
             const segmentGeo = new THREE.CylinderGeometry(0.1, 0.1, 1, 8);
             animState.geometriesToDispose.push(segmentGeo);
-            const segmentMat = new THREE.MeshStandardMaterial({ color: COLORS.PLAYER_BODY, emissive: COLORS.PLAYER_BODY, emissiveIntensity: 0.6 });
+            const segmentMat = new THREE.MeshStandardMaterial({ color: COLORS.PLAYER_BODY, emissive: COLORS.PLAYER_BODY, emissiveIntensity: 0.3 });
             animState.materialsToDispose.push(segmentMat);
             const snakeBody = new THREE.InstancedMesh(segmentGeo, segmentMat, maxSegments);
             snakeBody.layers.enable(BLOOM_LAYER);
-            snakeBody.frustumCulled = false; // Fix for disappearing body in FPV
+            snakeBody.frustumCulled = false;
             scene.add(snakeBody);
             animState.snakeBody = snakeBody;
             animState.dummy = new THREE.Object3D();
+
+            const tailGeo = new THREE.ConeGeometry(0.1, 1, 8);
+            animState.geometriesToDispose.push(tailGeo);
+            const snakeTail = new THREE.Mesh(tailGeo, segmentMat);
+            snakeTail.layers.enable(BLOOM_LAYER);
+            snakeTail.visible = false;
+            scene.add(snakeTail);
+            animState.snakeTail = snakeTail;
     
             const glowPlanes: THREE.Mesh[] = [];
-            const glowTexture = createGlowTexture(new THREE.Color(COLORS.PLAYER_BODY).multiplyScalar(1.2).getStyle());
-            const glowGeo = new THREE.PlaneGeometry(1.0, 1.0);
-            const glowMat = new THREE.MeshBasicMaterial({ map: glowTexture, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+            const glowGeo = new THREE.PlaneGeometry(0.8, 0.8);
+
+            const bodyGlowTexture = createGlowTexture(new THREE.Color(COLORS.PLAYER_BODY).multiplyScalar(1.2).getStyle());
+            animState.texturesToDispose.push(bodyGlowTexture);
+            const bodyGlowMat = new THREE.MeshBasicMaterial({ map: bodyGlowTexture, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+            animState.materialsToDispose.push(bodyGlowMat);
+
+            const headGlowTexture = createGlowTexture('#ffffff');
+            animState.texturesToDispose.push(headGlowTexture);
+            const headGlowMat = new THREE.MeshBasicMaterial({ map: headGlowTexture, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+            animState.materialsToDispose.push(headGlowMat);
+            
             for(let i = 0; i < maxSegments; i++) {
-                const plane = new THREE.Mesh(glowGeo, glowMat);
+                const plane = new THREE.Mesh(glowGeo, i === 0 ? headGlowMat : bodyGlowMat);
                 plane.rotation.x = -Math.PI / 2;
                 plane.visible = false;
                 plane.layers.enable(BLOOM_LAYER);
@@ -1091,6 +1232,32 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
             }
             animState.glowPlanes = glowPlanes;
     
+            const appleGlowGeo = new THREE.PlaneGeometry(1.5, 1.5);
+            animState.geometriesToDispose.push(appleGlowGeo);
+            const appleGlowColor = FRUIT_COLORS[FruitType.APPLE];
+            const appleGlowTexture = createGlowTexture(new THREE.Color(appleGlowColor).getStyle());
+            animState.texturesToDispose.push(appleGlowTexture);
+            const appleGlowMat = new THREE.MeshBasicMaterial({
+                map: appleGlowTexture,
+                transparent: true,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+            });
+            animState.materialsToDispose.push(appleGlowMat);
+            if (animState.reusable) {
+                animState.reusable.appleGlowMaterial = appleGlowMat;
+                animState.reusable.appleGlowGeo = appleGlowGeo;
+            }
+
+            const shadowTexture = createShadowTexture();
+            animState.texturesToDispose.push(shadowTexture);
+            const shadowGeo = new THREE.PlaneGeometry(0.9, 0.9);
+            animState.geometriesToDispose.push(shadowGeo);
+            if (animState.reusable) {
+                animState.reusable.shadowTexture = shadowTexture;
+                animState.reusable.shadowGeo = shadowGeo;
+            }
+
             const fruitGeometries = new Map<FruitType, THREE.BufferGeometry>();
             const fruitMaterials = new Map<FruitType, THREE.Material>();
             const s = 0.35;
@@ -1108,15 +1275,26 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                 const type = t as FruitType;
                 const color = FRUIT_COLORS[type];
                 let material;
-                if (type === FruitType.APPLE) material = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.7, roughness: 0.4, metalness: 0.1 });
-                else material = new THREE.MeshStandardMaterial({ color, roughness: 0.3, metalness: 0.1, });
+                if (type === FruitType.APPLE) {
+                    const isLowQuality = animState.graphicsQuality === 'Low';
+                    material = new THREE.MeshStandardMaterial({
+                        color,
+                        emissive: color,
+                        emissiveIntensity: isLowQuality ? 1.5 : 0.7,
+                        roughness: 0.4,
+                        metalness: 0.1,
+                        transparent: !isLowQuality,
+                        opacity: isLowQuality ? 1.0 : 0.7,
+                    });
+                } else {
+                    material = new THREE.MeshStandardMaterial({ color, roughness: 0.3, metalness: 0.1, });
+                }
                 fruitMaterials.set(type, material);
             });
             animState.fruitGeometries = fruitGeometries;
             animState.fruitMaterials = fruitMaterials;
     
             const renderPass = new RenderPass(scene, camera);
-            // Increased threshold for performance. Only very bright things will bloom.
             const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.8, 0.4, 0.85);
             animState.bloomPass = bloomPass;
     
@@ -1141,15 +1319,97 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
             const restoreMaterials = (obj: THREE.Object3D) => { if (materialsToRestore[obj.uuid]) { (obj as THREE.Mesh).material = materialsToRestore[obj.uuid] as THREE.Material; delete materialsToRestore[obj.uuid]; } };
             
             animState.interpolatedPositions = Array.from({ length: maxSegments }, () => new THREE.Vector3());
+            
+            const rainCount = 15000;
+            const rainVertices = [];
+            for (let i = 0; i < rainCount; i++) {
+                const x = THREE.MathUtils.randFloatSpread(100);
+                const y = THREE.MathUtils.randFloat(10, 50);
+                const z = THREE.MathUtils.randFloatSpread(100);
+                rainVertices.push(x, y, z);
+            }
+            const rainGeo = new THREE.BufferGeometry();
+            rainGeo.setAttribute('position', new THREE.Float32BufferAttribute(rainVertices, 3));
+            const rainMat = new THREE.PointsMaterial({ color: 0xaaaaee, size: 0.1, transparent: true, opacity: 0.6 });
+            animState.materialsToDispose.push(rainMat);
+            const rainSystem = new THREE.Points(rainGeo, rainMat);
+            rainSystem.visible = false;
+            scene.add(rainSystem);
+            animState.rainSystem = rainSystem;
+
+            const dustCount = 1000;
+            const dustVertices = [];
+            for (let i = 0; i < dustCount; i++) {
+                const x = THREE.MathUtils.randFloatSpread(40);
+                const y = THREE.MathUtils.randFloat(0.5, 10);
+                const z = THREE.MathUtils.randFloatSpread(40);
+                dustVertices.push(x, y, z);
+            }
+            const dustGeo = new THREE.BufferGeometry();
+            dustGeo.setAttribute('position', new THREE.Float32BufferAttribute(dustVertices, 3));
+            const dustTexture = createGlowTexture('rgba(200, 220, 255, 0.5)');
+            animState.texturesToDispose.push(dustTexture);
+            const dustMat = new THREE.PointsMaterial({ size: 0.15, map: dustTexture, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.5 });
+            animState.materialsToDispose.push(dustMat);
+            const dustSystem = new THREE.Points(dustGeo, dustMat);
+            scene.add(dustSystem);
+            animState.dustSystem = dustSystem;
     
             const animate = () => {
               animState.animationFrameId = requestAnimationFrame(animate);
               const { renderer: currentRenderer, scene: currentScene, camera: currentCamera, bloomComposer: currentBloomComposer, finalComposer } = animState;
               if (!currentRenderer || !currentScene || !currentCamera || !finalComposer || !currentBloomComposer) return;
-              const { cameraView, snakeHead, snakeBody, dummy, glowPlanes, towerLights, reusable, interpolatedPositions, fruitMeshes, searchlightBeams, searchlightTargets, fruits: currentFruits, isPassageFruitActive, bloomPass: currentBloomPass, portalGroups, drones, droneTargets, rotatingIcons, startAnim } = animState;
-              if (!snakeHead || !snakeBody || !dummy || !glowPlanes || !reusable || !interpolatedPositions || !fruitMeshes || !currentFruits || !currentBloomPass || !portalGroups) return;
-              const now = performance.now();
-              const isSnakeVisible = animState.gameState !== 'Starting' && !startAnim;
+              const { cameraView, snakeHead, snakeBody, snakeTail, dummy, glowPlanes, towerLights, reusable, interpolatedPositions, fruitMeshes, appleGlows, fruitShadows, searchlightBeams, searchlightTargets, fruits: currentFruits, clearingFruits, activeEffects, isPassageFruitActive, bloomPass: currentBloomPass, portalGroups, drones, droneTargets, rotatingIcons, startAnim, crashAnim, gameOverAnim, lightingSystem } = animState;
+              if (!snakeHead || !snakeBody || !dummy || !glowPlanes || !reusable || !interpolatedPositions || !fruitMeshes || !appleGlows || !fruitShadows || !currentFruits || !clearingFruits || !activeEffects || !currentBloomPass || !portalGroups) return;
+              
+              const now = Date.now();
+              const speedMps = 1000 / animState.gameSpeed;
+              const isSnakeVisible = animState.gameState !== 'Starting' || !startAnim;
+              const snakeHeadPos = isSnakeVisible && interpolatedPositions && interpolatedPositions.length > 0 ? interpolatedPositions[0] : null;
+              lightingSystem?.update(now, animState.gameState, animState.isPaused, speedMps, activeEffects, snakeHeadPos);
+
+              const twilightColor = new THREE.Color(0x294a66);
+              const midnightColor = new THREE.Color(0x050a15);
+              const scoreForMaxDarkness = 100;
+              const scoreProgress = Math.min(animState.score / scoreForMaxDarkness, 1.0);
+              const currentColor = reusable.tempColor.copy(twilightColor).lerp(midnightColor, scoreProgress);
+              if (!currentScene.background || !(currentScene.background as THREE.Color).equals(currentColor)) {
+                  currentScene.background = currentColor.clone();
+              }
+              if (currentScene.fog && !(currentScene.fog as THREE.FogExp2).color.equals(currentColor)) {
+                  (currentScene.fog as THREE.FogExp2).color.copy(currentColor);
+              }
+              
+              if (animState.dustSystem && animState.dustSystem.visible) {
+                  const positions = animState.dustSystem.geometry.attributes.position;
+                  const time = now * 0.0001;
+                  for (let i = 0; i < positions.count; i++) {
+                      let y = positions.getY(i);
+                      if (y > 10) {
+                          // This particle has drifted off the top, so we reset it to a new
+                          // random horizontal position at the bottom to maintain density.
+                          positions.setX(i, THREE.MathUtils.randFloatSpread(40));
+                          positions.setY(i, 0.5);
+                          positions.setZ(i, THREE.MathUtils.randFloatSpread(40));
+                      } else {
+                          // Otherwise, we just let it drift upwards and sideways.
+                          positions.setY(i, y + 0.005);
+                          const initialX = (positions.array[i * 3] / 40) * Math.PI * 2;
+                          const initialZ = (positions.array[i * 3 + 2] / 40) * Math.PI * 2;
+                          positions.setX(i, positions.getX(i) + Math.sin(time + initialZ) * 0.01);
+                          positions.setZ(i, positions.getZ(i) + Math.cos(time + initialX) * 0.01);
+                      }
+                  }
+                  positions.needsUpdate = true;
+              }
+              if (animState.rainSystem && animState.rainSystem.visible) {
+                  const positions = animState.rainSystem.geometry.attributes.position;
+                  for (let i = 0; i < positions.count; i++) {
+                      const y = positions.getY(i);
+                      positions.setY(i, y < -10 ? 50 + Math.random() * 20 : y - 0.5);
+                  }
+                  positions.needsUpdate = true;
+              }
               
               if (reusable.backgroundCylinder) {
                   const isWelcome = animState.gameState === 'Welcome';
@@ -1172,6 +1432,88 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                   }
               }
 
+              if (reusable.boardInstance && animState.layoutDetails && lightingSystem) {
+                const boardInstance = reusable.boardInstance;
+                const layoutDetails = animState.layoutDetails;
+            
+                const fruitsForHighlight = [...currentFruits, ...clearingFruits.map(cf => cf.fruit)];
+                const boardFruits = fruitsForHighlight.filter(f => FRUIT_CATEGORIES[f.type] !== 'PASSAGE');
+            
+                const highlightMap = new Map<string, Fruit[]>();
+            
+                for (const fruit of boardFruits) {
+                    const fx = fruit.position.x;
+                    const fz = fruit.position.z;
+            
+                    for (let x = WALL_THICKNESS; x < FULL_BOARD_WIDTH - WALL_THICKNESS; x++) {
+                        const key = `${x},${fz}`;
+                        if (!highlightMap.has(key)) highlightMap.set(key, []);
+                        highlightMap.get(key)!.push(fruit);
+                    }
+            
+                    for (let z = WALL_THICKNESS; z < FULL_BOARD_DEPTH - WALL_THICKNESS; z++) {
+                        const key = `${fx},${z}`;
+                        if (!highlightMap.has(key)) highlightMap.set(key, []);
+                        highlightMap.get(key)!.push(fruit);
+                    }
+                }
+            
+                const targetColor = new THREE.Color();
+                for (let i = 0; i < boardInstance.count; i++) {
+                    const x = Math.floor(i / FULL_BOARD_DEPTH);
+                    const z = i % FULL_BOARD_DEPTH;
+            
+                    const isStreet = isStreetPassageBlock(x, z, layoutDetails.street);
+                    const originalTileColor = isStreet ? COLORS.STREET : ((x + z) % 2 === 0 ? COLORS.BOARD_LIGHT : COLORS.BOARD_DARK);
+            
+                    targetColor.set(originalTileColor);
+            
+                    const tileFruits = highlightMap.get(`${x},${z}`);
+                    if (tileFruits) {
+                        const activeHighlightColors: THREE.Color[] = [];
+                        
+                        const activeFruits = tileFruits.filter(f => !clearingFruits.some(cf => cf.fruit.id === f.id));
+                        const clearingFruitsOnTile = tileFruits
+                            .map(f => clearingFruits.find(cf => cf.fruit.id === f.id))
+                            .filter((cf): cf is { fruit: Fruit; startTime: number } => !!cf);
+
+                        activeFruits.forEach(f => activeHighlightColors.push(new THREE.Color(FRUIT_COLORS[f.type])));
+
+                        if (clearingFruitsOnTile.length > 0 && activeFruits.length === 0) {
+                            const mostRecentClearing = clearingFruitsOnTile.reduce((a, b) => a.startTime > b.startTime ? a : b);
+                            const { fruit, startTime } = mostRecentClearing;
+
+                            const elapsed = now - startTime;
+                            const tileDist = Math.abs(x - fruit.position.x) + Math.abs(z - fruit.position.z);
+                            const WAVE_SPEED = 30; // grid units per second
+                            const waveDist = (elapsed / 1000) * WAVE_SPEED;
+                            
+                            if (tileDist >= waveDist) {
+                                clearingFruitsOnTile.forEach(cf => activeHighlightColors.push(new THREE.Color(FRUIT_COLORS[cf.fruit.type])));
+                            }
+                        }
+
+                        if (activeHighlightColors.length > 0) {
+                            const finalColor = reusable.tempColor.setRGB(0, 0, 0);
+                            activeHighlightColors.forEach(c => finalColor.add(c));
+                            finalColor.multiplyScalar(1 / activeHighlightColors.length);
+                            targetColor.lerp(finalColor, 0.4);
+                        }
+                    }
+
+                    const runwayColor = lightingSystem.getTileEffects(x, z, now);
+                    if (runwayColor) {
+                        targetColor.add(runwayColor);
+                    }
+            
+                    boardInstance.setColorAt(i, targetColor);
+                }
+            
+                if (boardInstance.instanceColor) {
+                    (boardInstance.instanceColor as THREE.InstancedBufferAttribute).needsUpdate = true;
+                }
+              }
+
               if (animState.billboardSlides && animState.billboardSlides.length > 0 && animState.lastBillboardSlideTime !== undefined && animState.currentBillboardSlideIndex !== undefined) {
                 const slide = animState.billboardSlides[animState.currentBillboardSlideIndex];
                 if (slide && now - animState.lastBillboardSlideTime > slide.duration) {
@@ -1186,22 +1528,70 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                 }
               }
     
-              if (startAnim && now > startAnim.startTime) {
+              if (gameOverAnim) {
+                  const elapsed = now - gameOverAnim.startTime;
+                  const t = Math.min(elapsed / gameOverAnim.duration, 1.0);
+                  const easeT = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; // easeInOutCubic
+    
+                  currentCamera.position.lerpVectors(gameOverAnim.startPos, gameOverAnim.endPos, easeT);
+                  currentCamera.quaternion.slerpQuaternions(gameOverAnim.startQuat, gameOverAnim.endQuat, easeT);
+    
+                  if (t >= 1.0) {
+                      animState.gameOverAnim = undefined;
+                      animState.orbitStartTime = undefined; // Reset orbit timer
+                      onGameOverAnimationComplete();
+                  }
+              } else if (startAnim && now > startAnim.startTime) {
                   const elapsed = now - startAnim.startTime;
                   const t = Math.min(elapsed / startAnim.duration, 1.0);
                   const easeT = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
     
                   reusable.interpolatedPos.lerpVectors(startAnim.startPos, startAnim.endPos, easeT);
-                  reusable.interpolatedPos.y += Math.sin(easeT * Math.PI) * 5; // Add vertical arc
+                  reusable.interpolatedPos.y += Math.sin(easeT * Math.PI) * 5;
                   currentCamera.position.copy(reusable.interpolatedPos);
     
-                  // Use Slerp for camera rotation for a smoother path
                   const targetQuat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(reusable.interpolatedPos, startAnim.endLookAt, new THREE.Vector3(0, 1, 0)));
                   currentCamera.quaternion.slerpQuaternions(startAnim.startQuat, targetQuat, easeT);
     
                   if (t >= 1.0) {
                       animState.startAnim = undefined;
                   }
+              }
+              else if (animState.gameState === 'Crashed' && crashAnim) {
+                  const elapsed = now - crashAnim.startTime;
+                  if (crashAnim.phase === 'shake') {
+                      const progress = Math.min(elapsed / crashAnim.shakeDuration, 1.0);
+                      currentBloomPass.strength = 0.8 + 5 * Math.sin(progress * Math.PI);
+                      
+                      const shakeAmount = 0.1 * (1 - progress);
+                      const posWithShake = crashAnim.startPos.clone();
+                      posWithShake.x += (Math.random() - 0.5) * shakeAmount;
+                      posWithShake.y += (Math.random() - 0.5) * shakeAmount;
+                      currentCamera.position.copy(posWithShake);
+                      currentCamera.quaternion.slerp(crashAnim.startQuat, 1.0);
+                      
+                      if (elapsed >= crashAnim.shakeDuration) {
+                          crashAnim.phase = 'ascending';
+                          crashAnim.startTime = now;
+                          crashAnim.startPos.copy(currentCamera.position);
+                          crashAnim.startQuat.copy(currentCamera.quaternion);
+                      }
+                  } else if (crashAnim.phase === 'ascending') {
+                      const progress = Math.min(elapsed / crashAnim.ascendDuration, 1.0);
+                      const easeT = 1 - Math.pow(1 - progress, 3); // easeOutCubic
+                      currentCamera.position.lerpVectors(crashAnim.startPos, crashAnim.ascendPos, easeT);
+                      currentCamera.quaternion.slerpQuaternions(crashAnim.startQuat, crashAnim.ascendQuat, easeT);
+                      
+                      if (progress >= 1.0) {
+                          animState.crashAnim = undefined;
+                          onCrashAnimationComplete();
+                      }
+                  }
+              }
+              else if (animState.gameState === 'Starting') {
+                    // This is a transition state. Do nothing and wait for startAnim to take over.
+                    // This prevents the camera from jumping to a gameplay view for one frame
+                    // before the start animation begins.
               }
               else if (cameraView === CameraView.ORBIT) {
                   if (!animState.orbitStartTime) animState.orbitStartTime = now;
@@ -1214,7 +1604,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                   const droneIndex = cameraView === CameraView.DRONE_1 ? 0 : 1;
                   const drone = drones?.[droneIndex];
                   if (drone) {
-                      const droneCameraMesh = drone.group.children[0].children[0]; // body -> cameraMesh
+                      const droneCameraMesh = drone.group.children[0].children[0];
                       droneCameraMesh.getWorldPosition(reusable.fp_camera_pos);
                       
                       const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(drone.group.quaternion);
@@ -1229,34 +1619,59 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                       currentCamera.lookAt(reusable.lookAtHelper);
                   }
               } else if (cameraView === CameraView.FIRST_PERSON) {
-                  if(snakeHead) {
+                  if (snakeHead && animState.fpvCameraQuaternion && reusable.euler) {
+                      if (animState.previousCameraView !== CameraView.FIRST_PERSON) {
+                          animState.fpvCameraQuaternion.setFromEuler(reusable.euler.set(0, animState.visualRotation, 0));
+                      }
+              
+                      reusable.endQuat.setFromEuler(reusable.euler.set(0, animState.visualRotation, 0));
+                      
+                      // Dynamically adjust turn speed based on game speed for responsiveness.
+                      const lerpFactor = Math.min(1.0, 60 / animState.gameSpeed);
+                      animState.fpvCameraQuaternion.slerp(reusable.endQuat, lerpFactor); 
+              
                       const headPos = reusable.fp_camera_pos; snakeHead.getWorldPosition(headPos);
-                      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(snakeHead.quaternion);
+                      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(animState.fpvCameraQuaternion);
+                      
                       currentCamera.position.copy(headPos).addScaledVector(forward, 0.2);
                       reusable.lookAtHelper.copy(headPos).add(forward);
                       currentCamera.lookAt(reusable.lookAtHelper);
                   }
+              } else if (cameraView === CameraView.THIRD_PERSON) {
+                  if(snakeHead) {
+                    const idealOffset = reusable.localPos.set(0, 1.2, 2.5);
+                    idealOffset.applyQuaternion(snakeHead.quaternion);
+                    snakeHead.getWorldPosition(reusable.worldPos);
+                    const idealPosition = reusable.worldPos.add(idealOffset);
+
+                    const idealLookAt = reusable.startPos.set(0, 0, -5);
+                    idealLookAt.applyQuaternion(snakeHead.quaternion);
+                    snakeHead.getWorldPosition(reusable.endPos);
+                    idealLookAt.add(reusable.endPos);
+                    
+                    // If we just switched to this view, snap the lookAt helper to prevent a jarring turn.
+                    if (animState.previousCameraView !== CameraView.THIRD_PERSON) {
+                      reusable.lookAtHelper.copy(idealLookAt);
+                    }
+                    
+                    const lerpFactor = Math.min(1.0, 32 / animState.gameSpeed);
+                    currentCamera.position.lerp(idealPosition, lerpFactor);
+                    reusable.lookAtHelper.lerp(idealLookAt, lerpFactor);
+                    currentCamera.lookAt(reusable.lookAtHelper);
+                  }
               }
               
-              if (animState.crashEffect) {
-                  const elapsed = now - animState.crashEffect.startTime;
-                  const progress = Math.min(elapsed / 1500, 1.0);
-                  currentBloomPass.strength = 0.8 + 5 * Math.sin(progress * Math.PI);
-                  if (animState.gameState !== 'GameOver') {
-                      currentCamera.rotation.z = Math.sin(now * 0.1) * 0.05 * (1 - progress);
-                  }
-              } else if(currentBloomPass.enabled) {
+              if(!animState.crashAnim && currentBloomPass.enabled) {
                   currentBloomPass.strength = 0.8;
               }
     
               if (drones && droneTargets && drones.length > 0 && !startAnim) {
-                  // DRONE UPDATE LOGIC
                   drones.forEach((drone, i) => {
                       const isCurrentView = (i === 0 && cameraView === CameraView.DRONE_1) || (i === 1 && cameraView === CameraView.DRONE_2);
                       drone.group.visible = !isCurrentView;
                       drone.propellers.forEach(p => { p.rotation.z += 0.5; });
                       
-                      if (i === 0) { // Drone 0 (Red, Cinematic)
+                      if (i === 0) {
                           const failsafe = animState.drone0Failsafe;
                           if (failsafe) {
                               if (failsafe.lastCheckTime === 0) {
@@ -1264,12 +1679,12 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                                   failsafe.lastPos.copy(drone.group.position);
                               }
                               const timeSinceCheck = now - failsafe.lastCheckTime;
-                              if (timeSinceCheck > 5000) { // Check every second
+                              if (timeSinceCheck > 5000) {
                                   const distanceMoved = failsafe.lastPos.distanceTo(drone.group.position);
-                                  if (distanceMoved < 0.1) { // If moved less than 0.1 units in a second
+                                  if (distanceMoved < 0.1) {
                                       failsafe.stuckDuration += timeSinceCheck;
                                   } else {
-                                      failsafe.stuckDuration = 0; // Reset if it moved
+                                      failsafe.stuckDuration = 0;
                                   }
                                   failsafe.lastPos.copy(drone.group.position);
                                   failsafe.lastCheckTime = now;
@@ -1277,7 +1692,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                           }
                           
                           let state = (droneTargets[0] as { state?: DroneState }).state;
-                          const isStuck = failsafe && failsafe.stuckDuration > 20000; // Stuck for 20 seconds
+                          const isStuck = failsafe && failsafe.stuckDuration > 20000;
                           
                           if (isStuck) {
                               console.warn("Drone 0 detected as stuck, forcing a state reset.");
@@ -1286,7 +1701,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                           if (!state || (now - state.startTime >= state.totalDuration) || isStuck) {
                             state = chooseNextDroneAction(animState, drone.group.position.clone(), drone.group.quaternion.clone());
                             (droneTargets[0] as { state: DroneState }).state = state;
-                            // Reset failsafe if it was triggered
                             if (isStuck && failsafe) {
                                 failsafe.stuckDuration = 0;
                                 failsafe.lastCheckTime = now;
@@ -1310,7 +1724,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                               const mainActionElapsed = elapsed - state.approachDuration;
                               const actionState = state.mainAction;
 
-                              // Ensure drone is at the precise start of the main action
                               if (mainActionElapsed < 50 && actionState.type !== 'PANORAMIC_DIVE') {
                                 droneObject.position.copy(state.targetPos);
                                 droneObject.quaternion.copy(state.targetQuat);
@@ -1319,16 +1732,13 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                               const actionProgress = Math.min(mainActionElapsed / state.mainActionDuration, 1.0);
                               
                               switch (actionState.type) {
-                                  case 'IDLE':
-                                      droneObject.position.y = state.targetPos.y + Math.sin(mainActionElapsed * 0.001) * 0.1;
-                                      break;
+                                  case 'IDLE': droneObject.position.y = state.targetPos.y + Math.sin(mainActionElapsed * 0.001) * 0.1; break;
                                   case 'WALL_RUN': {
                                       const easedActionT = actionProgress < 0.5 ? 2 * actionProgress * actionProgress : 1 - Math.pow(-2 * actionProgress + 2, 2) / 2;
                                       droneObject.position.lerpVectors(actionState.startPos, actionState.endPos, easedActionT);
-                                      // Add bobbing motion
                                       const pathDirection = reusable.localPos.subVectors(actionState.endPos, actionState.startPos).normalize();
                                       const sideVector = reusable.worldPos.crossVectors(pathDirection, reusable.axis_y!).normalize();
-                                      const bobbleOffset = Math.sin(actionProgress * Math.PI * 4) * 0.3; // 4 full sine cycles over the run
+                                      const bobbleOffset = Math.sin(actionProgress * Math.PI * 4) * 0.3;
                                       droneObject.position.addScaledVector(sideVector, bobbleOffset);
                                       break;
                                   }
@@ -1337,7 +1747,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                                       const easedActionT = actionProgress < 0.5 ? 2 * actionProgress * actionProgress : 1 - Math.pow(-2 * actionProgress + 2, 2) / 2;
                                       const angle = startAngle + easedActionT * arc;
 
-                                      // Calculate tangent for orbit plane (perpendicular to normal on XZ plane)
                                       const tangent = new THREE.Vector3(-normal.z, 0, normal.x).normalize();
                                       
                                       const orbitPos = center.clone()
@@ -1363,7 +1772,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                                       break;
                                   case 'ROTATE': {
                                       const startQuatForRotation = state.targetQuat;
-                                      // Use linear progress for a constant rotation speed
                                       const angle = actionProgress * actionState.arc;
                                       const rotation = new THREE.Quaternion().setFromAxisAngle(reusable.axis_y!, angle);
                                       droneObject.quaternion.copy(startQuatForRotation).multiply(rotation);
@@ -1378,13 +1786,13 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                                   case 'PANORAMIC_DIVE': {
                                     const phaseElapsed = mainActionElapsed - actionState.phaseStartTime;
 
-                                    if (actionState.phase === 'ASCENDING') { // Should be hovering after approach
+                                    if (actionState.phase === 'ASCENDING') {
                                         actionState.phase = 'HOVERING';
                                         actionState.phaseStartTime = mainActionElapsed;
                                     }
 
                                     if (actionState.phase === 'HOVERING') {
-                                        if (phaseElapsed > 2000) { // 2s hover
+                                        if (phaseElapsed > 2000) {
                                             actionState.phase = 'ROTATING_DOWN';
                                             actionState.phaseStartTime = mainActionElapsed;
                                         }
@@ -1401,7 +1809,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                                             const panProgress = Math.min((phaseElapsed - tiltDuration) / panDuration, 1.0);
                                             panQuat.setFromAxisAngle(reusable.axis_y, Math.PI * 2 * panProgress);
                                         }
-                                        // Apply tilt relative to current orientation, then pan in world space
                                         droneObject.quaternion.copy(state.targetQuat).multiply(tiltQuat);
                                         droneObject.quaternion.premultiply(panQuat);
 
@@ -1425,7 +1832,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
 
                                             const diveStartPos = droneObject.position.clone();
                                             const controlPoint = new THREE.Vector3().lerpVectors(diveStartPos, actionState.diveTargetPos, 0.5);
-                                            controlPoint.y = Math.max(controlPoint.y, diveStartPos.y); // Arc upwards or straight before going down
+                                            controlPoint.y = Math.max(controlPoint.y, diveStartPos.y);
                                             actionState.diveCurve = new THREE.QuadraticBezierCurve3(diveStartPos, controlPoint, actionState.diveTargetPos);
                                         }
                                     } else if (actionState.phase === 'DIVING') {
@@ -1442,12 +1849,11 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                                   }
                               }
                           }
-                          // Final safety clamp for drone 0
                           droneObject.position.x = THREE.MathUtils.clamp(droneObject.position.x, PLAYABLE_AREA_MIN_X, PLAYABLE_AREA_MAX_X);
                           droneObject.position.z = THREE.MathUtils.clamp(droneObject.position.z, PLAYABLE_AREA_MIN_Z, PLAYABLE_AREA_MAX_Z);
                           droneObject.position.y = THREE.MathUtils.clamp(droneObject.position.y, MIN_DRONE_ALTITUDE, animState.maxBuildingHeight + 5);
 
-                      } else { // Drone 1 (Blue, Aggressive)
+                      } else {
                           const targetInfo = droneTargets[i] as any;
                           let t = (now - targetInfo.startTime) / targetInfo.duration;
                           
@@ -1456,10 +1862,9 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                               targetInfo.currentPosition.copy(targetInfo.targetPosition);
                               targetInfo.duration = 6000 + Math.random() * 3000;
               
-                              // Restrict airspace to be directly above the 20x20 playable board area
                               const newX = (Math.random() - 0.5) * 20;
                               const newZ = (Math.random() - 0.5) * 20;
-                              const newAltitude = 5.0 + Math.random() * 4.0; // Altitude range [5.0, 9.0]
+                              const newAltitude = 5.0 + Math.random() * 4.0;
                               
                               targetInfo.targetPosition.set(newX, newAltitude, newZ);
                               t = 0;
@@ -1537,7 +1942,9 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                       }
                   });
               }
-              const tickDuration = Math.max(50, animState.gameSpeed); const timeSinceTick = now - animState.lastTickTime; const interp = animState.isCrashing ? 0 : Math.min(timeSinceTick / tickDuration, 1.0);
+              const tickDuration = Math.max(50, animState.gameSpeed);
+              const timeSinceTick = now - animState.lastTickTime;
+              const interp = animState.isCrashing ? 1.0 : Math.min(timeSinceTick / tickDuration, 1.0);
               
               snakeHead.visible = cameraView !== CameraView.FIRST_PERSON && !startAnim;
     
@@ -1550,15 +1957,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                       reusable.endPos.set(currSeg.x + offsetX, currSeg.y, currSeg.z + offsetZ);
                       interpolatedPositions[i].lerpVectors(reusable.startPos, reusable.endPos, interp);
                   }
-                  
-                  if (segmentCount > 2) {
-                      const tail = interpolatedPositions[segmentCount - 1];
-                      const tailJoint = interpolatedPositions[segmentCount - 2];
-                      const prevJoint = interpolatedPositions[segmentCount - 3];
-                      if (tailJoint.distanceTo(prevJoint) < 1.1) {
-                          tail.copy(tailJoint).add(reusable.localPos.subVectors(tailJoint, prevJoint));
-                      }
-                  }
     
                   if (segmentCount > 0) {
                       snakeHead.position.copy(interpolatedPositions[0]);
@@ -1567,8 +1965,10 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                       snakeHead.quaternion.slerpQuaternions(reusable.startQuat, reusable.endQuat, interp);
                   }
     
+                  const defaultUp = reusable.axis_y!;
                   let visibleCount = 0;
-                  for (let i = 0; i < segmentCount - 1; i++) {
+                  // Render all body segments except the last as cylinders
+                  for (let i = 0; i < segmentCount - 2; i++) {
                       const start = interpolatedPositions[i];
                       const end = interpolatedPositions[i + 1];
                       const distance = start.distanceTo(end);
@@ -1576,26 +1976,59 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
     
                       if (!isInvisible) {
                           dummy.position.lerpVectors(start, end, 0.5);
-                          dummy.lookAt(end);
-                          dummy.quaternion.multiply(reusable.correctionQuat);
+                          const direction = reusable.localPos.subVectors(end, start).normalize();
+                          if (direction.lengthSq() > 0.001) {
+                            dummy.quaternion.setFromUnitVectors(defaultUp, direction);
+                          }
                           dummy.updateMatrix();
                           snakeBody.setMatrixAt(visibleCount, dummy.matrix);
                           visibleCount++;
                       }
-    
-                      const glowPart = glowPlanes[i + 1];
-                      if(glowPart) {
-                          glowPart.position.set(end.x, 0.52, end.z);
-                          glowPart.visible = !isInvisible;
-                      }
                   }
                   snakeBody.count = visibleCount;
                   snakeBody.instanceMatrix.needsUpdate = true;
+
+                  // Position the cone as a "cap" on the last segment
+                  if (snakeTail) {
+                    if (segmentCount > 1) {
+                        const start = interpolatedPositions[segmentCount - 2];
+                        const end = interpolatedPositions[segmentCount - 1];
+                        const distance = start.distanceTo(end);
+                        const isInvisible = distance > 2.0;
+
+                        if (!isInvisible) {
+                            snakeTail.visible = true;
+                            const direction = reusable.localPos.subVectors(end, start).normalize();
+                            if (direction.lengthSq() > 0.001) {
+                                snakeTail.quaternion.setFromUnitVectors(defaultUp, direction);
+                            }
+                            // Position cone so its tip is at the 'end' point.
+                            // Cone origin is at half height. It points along +Y. Height is 1. Tip is at y=0.5.
+                            // After quaternion rotation, tip is at origin + direction*0.5.
+                            // We want tip at 'end'. So origin should be at 'end' - direction*0.5.
+                            snakeTail.position.copy(end).addScaledVector(direction, -0.5);
+                        } else {
+                            snakeTail.visible = false;
+                        }
+                    } else {
+                        snakeTail.visible = false;
+                    }
+                  }
     
                   for (let i = segmentCount; i < glowPlanes.length; i++) {
                       if(glowPlanes[i]) glowPlanes[i].visible = false;
                   }
     
+                  const isMagnetActive = activeEffects?.some(e => e.type === FruitType.MAGNET);
+                  if (isMagnetActive) {
+                      const pulse = 1.0 + Math.sin(now * 0.005) * 0.2;
+                      glowPlanes.forEach(p => p.scale.set(pulse, pulse, 1));
+                  } else {
+                      if (glowPlanes[0] && glowPlanes[0].scale.x !== 1.0) {
+                           glowPlanes.forEach(p => p.scale.set(1, 1, 1));
+                      }
+                  }
+
                   if (glowPlanes[0]) {
                       if (segmentCount > 0) {
                           glowPlanes[0].position.set(interpolatedPositions[0].x, 0.52, interpolatedPositions[0].z);
@@ -1604,13 +2037,123 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                           glowPlanes[0].visible = false;
                       }
                   }
+
+                  for (let i = 1; i < segmentCount; i++) {
+                     const glowPart = glowPlanes[i];
+                      if(glowPart) {
+                          const pos = interpolatedPositions[i];
+                          const prevPos = interpolatedPositions[i-1];
+                          const distance = pos.distanceTo(prevPos);
+                          const isInvisible = distance > 2.0;
+                          glowPart.position.set(pos.x, 0.52, pos.z);
+                          glowPart.visible = !isInvisible;
+                          
+                          if (i === segmentCount - 1 && !isMagnetActive) {
+                            glowPart.scale.set(0.6, 0.6, 0.6);
+                          } else if (!isMagnetActive) {
+                            glowPart.scale.set(1, 1, 1);
+                          }
+                      }
+                  }
+
               } else {
                   snakeBody.count = 0;
                   snakeBody.instanceMatrix.needsUpdate = true;
+                  if (snakeTail) snakeTail.visible = false;
                   glowPlanes.forEach(p => p.visible = false);
               }
               
-              const existingFruitIds = new Set<number>(); currentFruits.forEach(fruitData => { existingFruitIds.add(fruitData.id); let fruitMesh = fruitMeshes.get(fruitData.id); if (!fruitMesh) { const geo = animState.fruitGeometries?.get(fruitData.type); const mat = animState.fruitMaterials?.get(fruitData.type); if (geo && mat) { fruitMesh = new THREE.Mesh(geo, mat); fruitMesh.castShadow = true; fruitMesh.position.set(fruitData.position.x + offsetX, fruitData.position.y, fruitData.position.z + offsetZ); fruitMesh.layers.enable(BLOOM_LAYER); currentScene.add(fruitMesh); fruitMeshes.set(fruitData.id, fruitMesh); } } if (fruitMesh) { fruitMesh.rotation.y += 0.01; let baseHeight = 1.0; if (fruitData.type === FruitType.TRIPLE) { baseHeight = 1.15; } fruitMesh.position.y = baseHeight + Math.sin(now * 0.002 + fruitData.id) * 0.1; } }); for (const [id, mesh] of fruitMeshes.entries()) if (!existingFruitIds.has(id)) { currentScene.remove(mesh); fruitMeshes.delete(id); }
+              const existingFruitIds = new Set<number>();
+              currentFruits.forEach(fruitData => {
+                  existingFruitIds.add(fruitData.id);
+                  let fruitMesh = fruitMeshes.get(fruitData.id);
+                  let fruitShadow = fruitShadows.get(fruitData.id);
+
+                  if (!fruitMesh) {
+                      const geo = animState.fruitGeometries?.get(fruitData.type);
+                      const mat = animState.fruitMaterials?.get(fruitData.type);
+                      if (geo && mat && reusable?.shadowGeo && reusable.shadowTexture) {
+                          fruitMesh = new THREE.Mesh(geo, mat);
+                          fruitMesh.position.set(fruitData.position.x + offsetX, fruitData.position.y, fruitData.position.z + offsetZ);
+                          fruitMesh.layers.enable(BLOOM_LAYER);
+                          currentScene.add(fruitMesh);
+                          fruitMeshes.set(fruitData.id, fruitMesh);
+
+                          const shadowMaterial = new THREE.MeshBasicMaterial({
+                              map: reusable.shadowTexture,
+                              transparent: true,
+                              color: FRUIT_COLORS[fruitData.type],
+                              depthWrite: false,
+                          });
+                          animState.materialsToDispose.push(shadowMaterial);
+                          
+                          fruitShadow = new THREE.Mesh(reusable.shadowGeo, shadowMaterial);
+                          fruitShadow.position.set(
+                              fruitData.position.x + offsetX,
+                              0.51,
+                              fruitData.position.z + offsetZ
+                          );
+                          fruitShadow.rotation.x = -Math.PI / 2;
+                          currentScene.add(fruitShadow);
+                          fruitShadows.set(fruitData.id, fruitShadow);
+                          
+                          if (fruitData.type === FruitType.APPLE && reusable?.appleGlowMaterial && reusable.appleGlowGeo) {
+                              const glowPlane = new THREE.Mesh(reusable.appleGlowGeo, reusable.appleGlowMaterial);
+                              glowPlane.rotation.x = -Math.PI / 2;
+                              glowPlane.position.set(fruitData.position.x + offsetX, 0.52, fruitData.position.z + offsetZ);
+                              glowPlane.layers.enable(BLOOM_LAYER);
+                              currentScene.add(glowPlane);
+                              appleGlows.set(fruitData.id, glowPlane);
+                          }
+                      }
+                  }
+                  if (fruitMesh) {
+                      fruitMesh.rotation.y += 0.01;
+                      let baseHeight = 1.0;
+                      if (fruitData.type === FruitType.TRIPLE) {
+                          baseHeight = 1.15;
+                      }
+                      const newY = baseHeight + Math.sin(now * 0.002 + fruitData.id) * 0.1;
+                      fruitMesh.position.y = newY;
+
+                      if (fruitShadow) {
+                          fruitShadow.position.x = fruitMesh.position.x;
+                          fruitShadow.position.z = fruitMesh.position.z;
+                          const scale = THREE.MathUtils.mapLinear(newY, baseHeight - 0.1, baseHeight + 0.1, 0.9, 1.1);
+                          fruitShadow.scale.set(scale, scale, scale);
+                          (fruitShadow.material as THREE.MeshBasicMaterial).opacity = THREE.MathUtils.mapLinear(newY, baseHeight - 0.1, baseHeight + 0.1, 0.7, 1.0);
+                      }
+                      
+                      if (fruitData.type === FruitType.APPLE) {
+                          const glowPlane = appleGlows.get(fruitData.id);
+                          if (glowPlane) {
+                              glowPlane.position.x = fruitMesh.position.x;
+                              glowPlane.position.z = fruitMesh.position.z;
+                              const scale = THREE.MathUtils.mapLinear(newY, baseHeight - 0.1, baseHeight + 0.1, 0.95, 1.05);
+                              glowPlane.scale.set(scale, scale, scale);
+                          }
+                      }
+                  }
+              });
+              for (const [id, mesh] of fruitMeshes.entries()) {
+                  if (!existingFruitIds.has(id)) {
+                      currentScene.remove(mesh);
+                      fruitMeshes.delete(id);
+                      
+                      const shadowPlane = fruitShadows.get(id);
+                      if (shadowPlane) {
+                          currentScene.remove(shadowPlane);
+                          (shadowPlane.material as THREE.Material).dispose();
+                          fruitShadows.delete(id);
+                      }
+                      
+                      const glowPlane = appleGlows.get(id);
+                      if (glowPlane) {
+                          currentScene.remove(glowPlane);
+                          appleGlows.delete(id);
+                      }
+                  }
+              }
               
               if (animState.bloomPass?.enabled) {
                   currentScene.background = null; 
@@ -1621,6 +2164,10 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                   finalComposer.render();
               } else {
                   currentRenderer.render(currentScene, currentCamera);
+              }
+
+              if (animState.previousCameraView !== cameraView) {
+                  animState.previousCameraView = cameraView;
               }
             };
             animState.animate = animate;
@@ -1657,7 +2204,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                 animState.renderer = undefined;
             };
 
-            // Signal that the scene is ready.
             setIsSceneInitialized(true);
         };
 
@@ -1675,14 +2221,58 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
     };
   }, [handleResize]); 
 
-  // This useEffect rebuilds the layout and places ads when layoutDetails changes OR when the scene becomes initialized.
+  useEffect(() => {
+    const state = animationRef.current;
+    if (!isSceneInitialized || !state.reusable?.boardInstance || !state.roofMeshes) {
+        return;
+    }
+
+    const boardMaterial = state.reusable.boardInstance.material as THREE.MeshStandardMaterial;
+
+    if (!state.originalMaterialProperties) {
+        state.originalMaterialProperties = {
+            board: { roughness: boardMaterial.roughness, metalness: boardMaterial.metalness },
+            roofs: state.roofMeshes.map(r => ({
+                roughness: (r.material as THREE.MeshStandardMaterial).roughness,
+                metalness: (r.material as THREE.MeshStandardMaterial).metalness,
+            }))
+        };
+    }
+
+    if (weather === 'Rain') {
+        boardMaterial.roughness = 0.1;
+        boardMaterial.metalness = 0.9;
+        state.roofMeshes.forEach(roof => {
+            (roof.material as THREE.MeshStandardMaterial).roughness = 0.1;
+            (roof.material as THREE.MeshStandardMaterial).metalness = 0.8;
+        });
+        if (state.rainSystem) state.rainSystem.visible = true;
+        if (state.dustSystem) state.dustSystem.visible = false;
+    } else {
+        const originals = state.originalMaterialProperties;
+        boardMaterial.roughness = originals.board.roughness;
+        boardMaterial.metalness = originals.board.metalness;
+        state.roofMeshes.forEach((roof, i) => {
+            if (originals.roofs[i]) {
+                (roof.material as THREE.MeshStandardMaterial).roughness = originals.roofs[i].roughness;
+                (roof.material as THREE.MeshStandardMaterial).metalness = originals.roofs[i].metalness;
+            }
+        });
+        if (state.rainSystem) state.rainSystem.visible = false;
+        if (state.dustSystem) state.dustSystem.visible = true;
+    }
+    
+    boardMaterial.needsUpdate = true;
+    state.roofMeshes.forEach(roof => { (roof.material as THREE.MeshStandardMaterial).needsUpdate = true; });
+
+  }, [weather, isSceneInitialized]);
+
   useEffect(() => {
     const state = animationRef.current;
     if (!isSceneInitialized || !state.scene || !layoutDetails) {
         return;
     }
 
-    // Clean up previous layout
     if (state.layoutGroup) {
         state.scene.remove(state.layoutGroup);
         state.layoutGroup.traverse(object => {
@@ -1717,6 +2307,8 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
     state.billboardScreen = undefined;
     state.portalGroups = new Map();
     state.bannerMeshes = [];
+    state.buildingEdgesMesh = undefined;
+    state.buildingEdgePositions = [];
 
     const layoutGroup = new THREE.Group();
     state.layoutGroup = layoutGroup;
@@ -1724,18 +2316,17 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
     
     const textureLoader = new THREE.TextureLoader();
 
-    // Helper function to create an aspect-correct texture on a canvas
     const createAspectCorrectTexture = (
         texture: THREE.Texture,
         planeWidth: number,
         planeHeight: number,
-        backgroundColor: string | null // null for transparent
+        backgroundColor: string | null
     ): THREE.CanvasTexture => {
         const planeAspect = planeWidth / planeHeight;
         const image = texture.image;
         const imageAspect = image.width / image.height;
 
-        const canvasWidth = 512; // A reasonable power-of-two size
+        const canvasWidth = 512;
         const canvasHeight = Math.round(canvasWidth / planeAspect);
 
         const canvas = document.createElement('canvas');
@@ -1751,13 +2342,11 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
         let drawWidth, drawHeight, drawX, drawY;
 
         if (imageAspect > planeAspect) {
-            // Image is wider, fit to canvas width
             drawWidth = canvasWidth;
             drawHeight = canvasWidth / imageAspect;
             drawX = 0;
             drawY = (canvasHeight - drawHeight) / 2;
         } else {
-            // Image is taller, fit to canvas height
             drawHeight = canvasHeight;
             drawWidth = canvasHeight * imageAspect;
             drawX = (canvasWidth - drawWidth) / 2;
@@ -1767,7 +2356,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
         ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
 
         const canvasTexture = new THREE.CanvasTexture(canvas);
-        state.texturesToDispose.push(canvasTexture); // Manage disposal
+        state.texturesToDispose.push(canvasTexture);
         return canvasTexture;
     };
 
@@ -1790,9 +2379,21 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
     [0.6, 1.0].forEach(height => { const geo = new THREE.ConeGeometry(0.5 * Math.SQRT2, height, 4); geo.rotateY(Math.PI / 4); geo.translate(0, height / 2, 0); roofGeometries.pyramid.push(geo); state.geometriesToDispose.push(geo); });
     const portalBubbleMaterial = new THREE.MeshPhysicalMaterial({ color: 0x000000, transparent: true, opacity: 0.1, roughness: 0.1, metalness: 0.9, transmission: 0.9, ior: 1.5, envMapIntensity: 1, depthWrite: false });
     state.materialsToDispose.push(portalBubbleMaterial);
-    const wallLineMaterial = new THREE.LineBasicMaterial({ color: 0x374151, linewidth: 2 });
-    state.materialsToDispose.push(wallLineMaterial);
-    const boardMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.8, roughness: 0.1 });
+    
+    const buildingEdgeVertices: number[] = [];
+    const collectEdgeVertices = (mesh: THREE.Mesh, targetArray: number[]) => {
+        const edges = new THREE.EdgesGeometry(mesh.geometry);
+        const posAttr = edges.getAttribute('position');
+        mesh.updateWorldMatrix(true, false);
+        for (let i = 0; i < posAttr.count; i++) {
+            const vertex = new THREE.Vector3().fromBufferAttribute(posAttr, i);
+            vertex.applyMatrix4(mesh.matrixWorld);
+            targetArray.push(vertex.x, vertex.y, vertex.z);
+        }
+        state.geometriesToDispose.push(edges);
+    };
+
+    const boardMaterial = new THREE.MeshStandardMaterial({ metalness: 0.8, roughness: 0.1 });
     state.materialsToDispose.push(boardMaterial);
     const boardInstance = new THREE.InstancedMesh(brickGeometry, boardMaterial, FULL_BOARD_WIDTH * FULL_BOARD_DEPTH);
     boardInstance.receiveShadow = true;
@@ -1809,64 +2410,27 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
       }
     }
     layoutGroup.add(boardInstance);
+    if(state.reusable) {
+        state.reusable.boardInstance = boardInstance;
+    }
+
+
     const gridHelper = new THREE.GridHelper(FULL_BOARD_WIDTH, FULL_BOARD_WIDTH, COLORS.GRID_LINES, COLORS.GRID_LINES);
     gridHelper.position.set(0, 0.51, 0); 
+    (gridHelper.material as THREE.LineBasicMaterial).vertexColors = true;
+    gridHelper.layers.enable(BLOOM_LAYER);
     layoutGroup.add(gridHelper);
+    
     const addBuildingColumn = (x: number, z: number, height: number, roofType: 'flat' | 'apex' | 'slanted' | 'pyramid' = 'flat') => { const buildingGeo = new THREE.BoxGeometry(1, height, 1); state.geometriesToDispose.push(buildingGeo); const materialIndex = Math.floor(Math.random() * wallMaterials.length); const buildingMaterial = wallMaterials[materialIndex]; const buildingMesh = new THREE.Mesh(buildingGeo, buildingMaterial); buildingMesh.position.set(x + offsetX, 0.5 + height / 2, z + offsetZ); buildingMesh.castShadow = true; buildingMesh.receiveShadow = true; const buildingColorHex = buildingColors[materialIndex]; const roofColor = new THREE.Color(buildingColorHex).multiplyScalar(0.9); const roofMaterial = new THREE.MeshStandardMaterial({ color: roofColor, roughness: 0.9, metalness: 0.1, }); state.materialsToDispose.push(roofMaterial); let roofMesh: THREE.Mesh; if (roofType === 'flat') { const roofGeo = new THREE.PlaneGeometry(1, 1); state.geometriesToDispose.push(roofGeo); roofMesh = new THREE.Mesh(roofGeo, roofMaterial); roofMesh.rotation.x = -Math.PI / 2; roofMesh.position.y = height / 2 + 0.001; } else if (roofType === 'pyramid') { const geoPool = roofGeometries.pyramid; const roofGeo = geoPool[Math.floor(Math.random() * geoPool.length)]; roofMesh = new THREE.Mesh(roofGeo, roofMaterial); roofMesh.position.y = height / 2; } else {
       const geoPool = roofType === 'apex' ? roofGeometries.apex : roofGeometries.slanted;
       const roofGeo = geoPool[Math.floor(Math.random() * geoPool.length)];
       roofMesh = new THREE.Mesh(roofGeo, roofMaterial);
       roofMesh.position.y = height / 2;
       if (Math.random() < 0.5) { roofMesh.rotation.y = Math.PI / 2; }
-    } buildingMesh.add(roofMesh); const edges = new THREE.EdgesGeometry(buildingMesh.geometry); state.geometriesToDispose.push(edges); const line = new THREE.LineSegments(edges, wallLineMaterial); buildingMesh.add(line); layoutGroup.add(buildingMesh); return buildingMesh; };
-    const addTransmissionTower = (x: number, z: number) => {
-        const towerGroup = new THREE.Group();
-        towerGroup.position.set(x + offsetX, 0.5, z + offsetZ);
-        const materialIndex = Math.floor(Math.random() * wallMaterials.length);
-        const randomMaterial = wallMaterials[materialIndex];
-        const baseHeight = 1;
-        const baseGeo = new THREE.BoxGeometry(1, baseHeight, 1);
-        state.geometriesToDispose.push(baseGeo);
-        const base = new THREE.Mesh(baseGeo, randomMaterial);
-        base.position.y = baseHeight / 2;
-        const baseEdges = new THREE.EdgesGeometry(base.geometry);
-        state.geometriesToDispose.push(baseEdges);
-        base.add(new THREE.LineSegments(baseEdges, wallLineMaterial));
-        const roofGeo = new THREE.PlaneGeometry(0.95, 0.95);
-        state.geometriesToDispose.push(roofGeo);
-        const roofMaterial = new THREE.MeshStandardMaterial({ color: buildingColors[materialIndex], roughness: 0.8, metalness: 0.1 });
-        state.materialsToDispose.push(roofMaterial);
-        const roofMesh = new THREE.Mesh(roofGeo, roofMaterial);
-        roofMesh.rotation.x = -Math.PI / 2;
-        roofMesh.position.y = baseHeight / 2 + 0.01;
-        base.add(roofMesh);
-        towerGroup.add(base);
-
-        const coneHeight = 3;
-        const coneGeo = new THREE.ConeGeometry(0.4, coneHeight, 8);
-        state.geometriesToDispose.push(coneGeo);
-        const cone = new THREE.Mesh(coneGeo, randomMaterial);
-        cone.position.y = baseHeight + coneHeight / 2;
-        towerGroup.add(cone);
-
-        const lightColor = 0xff2222;
-        const light = new THREE.PointLight(lightColor, 2, 3);
-        light.position.y = baseHeight + coneHeight + 0.2;
-        const lightMeshGeo = new THREE.SphereGeometry(0.05, 8, 8);
-        state.geometriesToDispose.push(lightMeshGeo);
-        const lightMeshMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: lightColor, emissiveIntensity: 1, toneMapped: false });
-        state.materialsToDispose.push(lightMeshMat);
-        const lightMesh = new THREE.Mesh(lightMeshGeo, lightMeshMat);
-        lightMesh.position.copy(light.position);
-        lightMesh.layers.enable(BLOOM_LAYER);
-        towerGroup.add(lightMesh);
-        state.towerLights.push({ light, mesh: lightMesh });
-        towerGroup.add(light);
-        layoutGroup.add(towerGroup);
-        return towerGroup;
-    };
+    } buildingMesh.add(roofMesh); collectEdgeVertices(buildingMesh, buildingEdgeVertices); layoutGroup.add(buildingMesh); if(state.roofMeshes) { state.roofMeshes.push(roofMesh) }; return buildingMesh; };
+    const addTransmissionTower = (x: number, z: number) => { const towerGroup = new THREE.Group(); towerGroup.position.set(x + offsetX, 0.5, z + offsetZ); const materialIndex = Math.floor(Math.random() * wallMaterials.length); const randomMaterial = wallMaterials[materialIndex]; const baseHeight = 1; const baseGeo = new THREE.BoxGeometry(1, baseHeight, 1); state.geometriesToDispose.push(baseGeo); const base = new THREE.Mesh(baseGeo, randomMaterial); base.position.y = baseHeight / 2; const roofGeo = new THREE.PlaneGeometry(0.95, 0.95); state.geometriesToDispose.push(roofGeo); const roofMaterial = new THREE.MeshStandardMaterial({ color: buildingColors[materialIndex], roughness: 0.8, metalness: 0.1 }); state.materialsToDispose.push(roofMaterial); const roofMesh = new THREE.Mesh(roofGeo, roofMaterial); roofMesh.rotation.x = -Math.PI / 2; roofMesh.position.y = baseHeight / 2 + 0.01; base.add(roofMesh); if(state.roofMeshes) { state.roofMeshes.push(roofMesh) }; towerGroup.add(base); const coneHeight = 3; const coneGeo = new THREE.ConeGeometry(0.4, coneHeight, 8); state.geometriesToDispose.push(coneGeo); const cone = new THREE.Mesh(coneGeo, randomMaterial); cone.position.y = baseHeight + coneHeight / 2; towerGroup.add(cone); const lightColor = 0xff2222; const light = new THREE.PointLight(lightColor, 2, 3); light.position.y = baseHeight + coneHeight + 0.2; const lightMeshGeo = new THREE.SphereGeometry(0.05, 8, 8); state.geometriesToDispose.push(lightMeshGeo); const lightMeshMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: lightColor, emissiveIntensity: 1, toneMapped: false }); state.materialsToDispose.push(lightMeshMat); const lightMesh = new THREE.Mesh(lightMeshGeo, lightMeshMat); lightMesh.position.copy(light.position); lightMesh.layers.enable(BLOOM_LAYER); towerGroup.add(lightMesh); state.towerLights.push({ light, mesh: lightMesh }); towerGroup.add(light); collectEdgeVertices(base, buildingEdgeVertices); collectEdgeVertices(cone, buildingEdgeVertices); layoutGroup.add(towerGroup); return towerGroup; };
     const addSkyscraper = (x: number, z: number, height: number, logoUrl: string) => { const buildingMesh = addBuildingColumn(x, z, height, 'flat'); const rooftopIcon = createQuantumRooftopIcon(state); rooftopIcon.position.y = height / 2; buildingMesh.add(rooftopIcon); state.rotatingIcons?.push(rooftopIcon); textureLoader.load(logoUrl, (texture) => { state.texturesToDispose.push(texture); const aspectRatio = texture.image.width / texture.image.height; const logoSize = 2.2; const logoWidth = aspectRatio >= 1 ? logoSize : logoSize * aspectRatio; const logoHeight = aspectRatio < 1 ? logoSize : logoSize / aspectRatio; const logoMaterial = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide }); state.materialsToDispose.push(logoMaterial); const logoGeometry = new THREE.PlaneGeometry(logoWidth, logoHeight); state.geometriesToDispose.push(logoGeometry); const logoMesh = new THREE.Mesh(logoGeometry, logoMaterial); logoMesh.position.y = height / 2 - logoHeight / 2 - 0.2; const offset = 0.51; if (x < WALL_THICKNESS) { logoMesh.position.x = offset; logoMesh.rotation.y = Math.PI / 2; } else if (x >= FULL_BOARD_WIDTH - WALL_THICKNESS) { logoMesh.position.x = -offset; logoMesh.rotation.y = -Math.PI / 2; } else if (z < WALL_THICKNESS) { logoMesh.position.z = offset; logoMesh.rotation.y = 0; } else { logoMesh.position.z = -offset; logoMesh.rotation.y = Math.PI; } buildingMesh.add(logoMesh); }); return buildingMesh; };
-    const addSnakeTower = (x: number, z: number, height: number, logoUrl: string) => { const buildingMesh = addBuildingColumn(x, z, height, 'flat'); const helipadTexture = createHeliPadTexture(); state.texturesToDispose.push(helipadTexture); const helipadGeo = new THREE.CircleGeometry(0.4, 32); state.geometriesToDispose.push(helipadGeo); const helipadMat = new THREE.MeshStandardMaterial({ map: helipadTexture, roughness: 0.7 }); state.materialsToDispose.push(helipadMat); const helipadMesh = new THREE.Mesh(helipadGeo, helipadMat); helipadMesh.rotation.x = -Math.PI / 2; helipadMesh.position.y = height / 2 + 0.01; helipadMesh.receiveShadow = true; buildingMesh.add(helipadMesh); const lightGeo = new THREE.SphereGeometry(0.03, 8, 8); state.geometriesToDispose.push(lightGeo); const lightColor = 0xff0000; const lightMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: lightColor, emissiveIntensity: 1.5, toneMapped: false }); state.materialsToDispose.push(lightMat); const lightPositions = [ new THREE.Vector3(0.42, 0, 0), new THREE.Vector3(-0.42, 0, 0), new THREE.Vector3(0, 0, 0.42), new THREE.Vector3(0, 0, -0.42), ]; lightPositions.forEach(pos => { const lightMesh = new THREE.Mesh(lightGeo, lightMat); lightMesh.position.copy(pos); lightMesh.position.y = height / 2 + 0.02; lightMesh.layers.enable(BLOOM_LAYER); buildingMesh.add(lightMesh); }); textureLoader.load(logoUrl, (texture) => { state.texturesToDispose.push(texture); const aspectRatio = texture.image.width / texture.image.height; const logoWidth = 0.95; const logoHeight = logoWidth / aspectRatio; const logoMaterial = new THREE.MeshBasicMaterial({ map: texture, transparent: true }); state.materialsToDispose.push(logoMaterial); const logoGeometry = new THREE.PlaneGeometry(logoWidth, logoHeight); state.geometriesToDispose.push(logoGeometry); const logoYPosition = height / 2 - logoHeight / 2 - 0.1; const offset = 0.51; const sides = [ { position: new THREE.Vector3(0, logoYPosition, offset), rotation: new THREE.Euler(0, 0, 0) }, { position: new THREE.Vector3(0, logoYPosition, -offset), rotation: new THREE.Euler(0, Math.PI, 0) }, { position: new THREE.Vector3(offset, logoYPosition, 0), rotation: new THREE.Euler(0, Math.PI / 2, 0) }, { position: new THREE.Vector3(-offset, logoYPosition, 0), rotation: new THREE.Euler(0, -Math.PI / 2, 0) } ]; sides.forEach(side => { const logoMesh = new THREE.Mesh(logoGeometry, logoMaterial); logoMesh.position.copy(side.position); logoMesh.rotation.copy(side.rotation); buildingMesh.add(logoMesh); }); }); return buildingMesh; };
+    const addSnakeTower = (x: number, z: number, height: number, logoUrl: string) => { const buildingMesh = addBuildingColumn(x, z, height, 'flat'); const helipadTexture = createHeliPadTexture(); state.texturesToDispose.push(helipadTexture); const helipadGeo = new THREE.CircleGeometry(0.4, 32); state.geometriesToDispose.push(helipadGeo); const helipadMat = new THREE.MeshStandardMaterial({ map: helipadTexture, roughness: 0.7 }); state.materialsToDispose.push(helipadMat); const helipadMesh = new THREE.Mesh(helipadGeo, helipadMat); helipadMesh.rotation.x = -Math.PI / 2; helipadMesh.position.y = height / 2 + 0.01; helipadMesh.receiveShadow = true; if(state.roofMeshes) state.roofMeshes.push(helipadMesh); buildingMesh.add(helipadMesh); const lightGeo = new THREE.SphereGeometry(0.03, 8, 8); state.geometriesToDispose.push(lightGeo); const lightColor = 0xff0000; const lightMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: lightColor, emissiveIntensity: 1.5, toneMapped: false }); state.materialsToDispose.push(lightMat); const lightPositions = [ new THREE.Vector3(0.42, 0, 0), new THREE.Vector3(-0.42, 0, 0), new THREE.Vector3(0, 0, 0.42), new THREE.Vector3(0, 0, -0.42), ]; lightPositions.forEach(pos => { const lightMesh = new THREE.Mesh(lightGeo, lightMat); lightMesh.position.copy(pos); lightMesh.position.y = height / 2 + 0.02; lightMesh.layers.enable(BLOOM_LAYER); buildingMesh.add(lightMesh); }); textureLoader.load(logoUrl, (texture) => { state.texturesToDispose.push(texture); const aspectRatio = texture.image.width / texture.image.height; const logoWidth = 0.95; const logoHeight = logoWidth / aspectRatio; const logoMaterial = new THREE.MeshBasicMaterial({ map: texture, transparent: true }); state.materialsToDispose.push(logoMaterial); const logoGeometry = new THREE.PlaneGeometry(logoWidth, logoHeight); state.geometriesToDispose.push(logoGeometry); const logoYPosition = height / 2 - logoHeight / 2 - 0.1; const offset = 0.51; const sides = [ { position: new THREE.Vector3(0, logoYPosition, offset), rotation: new THREE.Euler(0, 0, 0) }, { position: new THREE.Vector3(0, logoYPosition, -offset), rotation: new THREE.Euler(0, Math.PI, 0) }, { position: new THREE.Vector3(offset, logoYPosition, 0), rotation: new THREE.Euler(0, Math.PI / 2, 0) }, { position: new THREE.Vector3(-offset, logoYPosition, 0), rotation: new THREE.Euler(0, -Math.PI / 2, 0) } ]; sides.forEach(side => { const logoMesh = new THREE.Mesh(logoGeometry, logoMaterial); logoMesh.position.copy(side.position); logoMesh.rotation.copy(side.rotation); buildingMesh.add(logoMesh); }); }); return buildingMesh; };
     const addSearchlightTower = (x: number, z: number) => { const height = 4; const buildingMesh = addBuildingColumn(x, z, height, 'flat'); const searchlightBaseGroup = new THREE.Group(); searchlightBaseGroup.position.y = height / 2; buildingMesh.add(searchlightBaseGroup); const lightColor = 0xffffaa; const createBeam = (xOffset: number): THREE.Group => { const beamGroup = new THREE.Group(); beamGroup.position.x = xOffset; const beamHeight = 30; const beamGeo = new THREE.CylinderGeometry(0.01, 0.2, beamHeight, 8, 1, true); state.geometriesToDispose.push(beamGeo); const beamMat = new THREE.MeshBasicMaterial({ color: lightColor, transparent: true, opacity: 0.15, side: THREE.DoubleSide }); state.materialsToDispose.push(beamMat); const beam = new THREE.Mesh(beamGeo, beamMat); beam.position.y = beamHeight / 2; beamGroup.add(beam); const baseGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.2, 8); state.geometriesToDispose.push(baseGeo); const baseMat = new THREE.MeshStandardMaterial({color: '#444444'}); state.materialsToDispose.push(baseMat); const base = new THREE.Mesh(baseGeo, baseMat); base.position.y = 0.1; beamGroup.add(base); return beamGroup; }; const beam1 = createBeam(-0.2); const beam2 = createBeam(0.2); searchlightBaseGroup.add(beam1, beam2); state.searchlightBeams = [beam1, beam2]; state.searchlightTargets = []; const randomQuat = () => new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.random() * (Math.PI / 4), Math.random() * Math.PI * 2, 0, 'YXZ')); for (let i = 0; i < 2; i++) state.searchlightTargets.push({ currentRotation: randomQuat(), nextRotation: randomQuat(), startTime: 0, duration: 4000 + Math.random() * 3000, }); };
     const addBillboard = (details: BillboardDetails, parentObject: THREE.Object3D) => {
       const { x: startX, z: startZ, wall } = details;
@@ -1890,10 +2454,8 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
         roofMesh.rotation.x = -Math.PI / 2;
         roofMesh.position.y = chamberHeight / 2 + 0.01;
         baseMesh.add(roofMesh);
-        const edges = new THREE.EdgesGeometry(baseMesh.geometry);
-        state.geometriesToDispose.push(edges);
-        const line = new THREE.LineSegments(edges, wallLineMaterial);
-        baseMesh.add(line);
+        if(state.roofMeshes) state.roofMeshes.push(roofMesh);
+        collectEdgeVertices(baseMesh, buildingEdgeVertices);
         parentObject.add(baseMesh);
       }
       const billboardGroup = new THREE.Group();
@@ -1961,19 +2523,13 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
     
     const addPoster = (details: StreetPassageDetails, parentObject: THREE.Object3D) => {
         const { wall, entry, exit } = details;
-        const minPos = Math.min(entry, exit) + WALL_THICKNESS;
-        const maxPos = Math.max(entry, exit) + WALL_THICKNESS;
-        const Z_FIGHT_OFFSET = 0.02;
-
         const posterHeight = 1.1;
         const posterWidth = posterHeight * (9 / 16);
-        const posterY = 0.5 + posterHeight / 2 + 0.1; // Reduced bottom padding
+        const posterY = 0.5 + posterHeight / 2 + 0.1;
 
         const posterGeo = new THREE.PlaneGeometry(posterWidth, posterHeight);
         state.geometriesToDispose.push(posterGeo);
         
-        // Use a single, generic placeholder material to avoid race conditions.
-        // The ad placement logic will apply the correct texture later.
         const placeholderMaterial = new THREE.MeshStandardMaterial({ 
             color: 0x111111,
             emissive: 0x000000,
@@ -1982,28 +2538,32 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
         state.materialsToDispose.push(placeholderMaterial);
 
         const poster1 = new THREE.Mesh(posterGeo, placeholderMaterial);
-        const poster2 = new THREE.Mesh(posterGeo, placeholderMaterial.clone()); // Use a clone for the second poster
+        const poster2 = new THREE.Mesh(posterGeo, placeholderMaterial.clone());
         state.materialsToDispose.push(poster2.material as THREE.Material);
 
         poster1.userData = { adType: 'Poster' };
         poster2.userData = { adType: 'Poster' };
 
+        const zFightOffset = 0.02;
+        const minPos = Math.min(entry, exit) + WALL_THICKNESS;
+        const maxPos = Math.max(entry, exit) + WALL_THICKNESS;
+
         if (wall === 'N' || wall === 'S') {
             const passageZ = (wall === 'N') ? (1.0 + offsetZ) : ((FULL_BOARD_DEPTH - 2.0) + offsetZ);
             
-            poster1.position.set((minPos - 1) + offsetX + 0.5 + Z_FIGHT_OFFSET, posterY, passageZ);
+            poster1.position.set((minPos - 1) + offsetX + 0.5 + zFightOffset, posterY, passageZ);
             poster1.rotation.y = -Math.PI / 2;
             
-            poster2.position.set((maxPos + 1) + offsetX - 0.5 - Z_FIGHT_OFFSET, posterY, passageZ);
+            poster2.position.set((maxPos + 1) + offsetX - 0.5 - zFightOffset, posterY, passageZ);
             poster2.rotation.y = Math.PI / 2;
 
-        } else { // W or E
+        } else {
             const passageX = (wall === 'W') ? (1.0 + offsetX) : ((FULL_BOARD_WIDTH - 2.0) + offsetX);
 
-            poster1.position.set(passageX, posterY, (minPos - 1) + offsetZ + 0.5 + Z_FIGHT_OFFSET);
+            poster1.position.set(passageX, posterY, (minPos - 1) + offsetZ + 0.5 + zFightOffset);
             poster1.rotation.y = 0;
             
-            poster2.position.set(passageX, posterY, (maxPos + 1) + offsetZ - 0.5 - Z_FIGHT_OFFSET);
+            poster2.position.set(passageX, posterY, (maxPos + 1) + offsetZ - 0.5 - zFightOffset);
             poster2.rotation.y = Math.PI;
         }
 
@@ -2017,36 +2577,25 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
 
     let maxHeight = 0;
     layoutDetails.buildings.forEach(b => { if (b.height > maxHeight) maxHeight = b.height; });
-    state.maxBuildingHeight = maxHeight + 1; // Set a ceiling 1 unit above the tallest building
+    state.maxBuildingHeight = maxHeight + 1;
 
     layoutDetails.buildings.forEach(building => {
         const { x, z, height, type, roofType } = building;
         const snakeLogoUrl = 'https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/snakes.png';
         const quantumLogoUrl = 'https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/Quantum%20Industries%20Logo.png';
         switch (type) {
-            case 'snake-tower':
-                addSnakeTower(x, z, height, snakeLogoUrl);
-                break;
-            case 'skyscraper-quantum':
-                addSkyscraper(x, z, height, quantumLogoUrl);
-                break;
-            case 'transmission-tower':
-                addTransmissionTower(x, z);
-                break;
-            case 'searchlight-tower':
-                addSearchlightTower(x, z);
-                break;
-            case 'regular':
-                addBuildingColumn(x, z, height, roofType);
-                break;
+            case 'snake-tower': addSnakeTower(x, z, height, snakeLogoUrl); break;
+            case 'skyscraper-quantum': addSkyscraper(x, z, height, quantumLogoUrl); break;
+            case 'transmission-tower': addTransmissionTower(x, z); break;
+            case 'searchlight-tower': addSearchlightTower(x, z); break;
+            case 'regular': addBuildingColumn(x, z, height, roofType); break;
         }
     });
     
-    // Add Banners
     if (layoutDetails.banners) {
         const paidBannerGeo = new THREE.PlaneGeometry(0.9, 0.9 * (9 / 16));
         state.geometriesToDispose.push(paidBannerGeo);
-        const cosmeticBannerGeo = new THREE.PlaneGeometry(1.4, 1.4 * 9 / 16); // 16:9 landscape ratio
+        const cosmeticBannerGeo = new THREE.PlaneGeometry(1.4, 1.4 * 9 / 16);
         state.geometriesToDispose.push(cosmeticBannerGeo);
 
         const cosmeticAdTexture = createAdBannerTexture();
@@ -2061,9 +2610,9 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
         state.materialsToDispose.push(cosmeticBannerMaterial);
 
         const paidBannerMaterial = new THREE.MeshStandardMaterial({
-            map: cosmeticAdTexture, // Placeholder
+            map: cosmeticAdTexture,
             emissive: 0xffffff,
-            emissiveMap: cosmeticAdTexture, // Placeholder
+            emissiveMap: cosmeticAdTexture,
             emissiveIntensity: 0.6,
             color: 0xffffff,
             side: THREE.DoubleSide
@@ -2101,18 +2650,13 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                 const poleMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.6, metalness: 0.8 });
                 state.materialsToDispose.push(poleMat);
                 
-                const bannerHeight = (cosmeticBannerGeo.parameters as any).height; // 0.6
+                const bannerHeight = (cosmeticBannerGeo.parameters as any).height;
                 const spacer = 0.05;
                 const isFlipped = banner.wall === 'E' || banner.wall === 'W';
                 const poleZOffset = isFlipped ? spacer : -spacer;
 
                 const pole1 = new THREE.Mesh(poleGeo, poleMat);
-                pole1.position.set(
-                    -0.5, // 1 unit separation, so at -0.5 and +0.5
-                    bannerHeight / 2 - poleHeight / 2, // Top of pole is flush with top of banner
-                    poleZOffset
-                );
-
+                pole1.position.set(-0.5, bannerHeight / 2 - poleHeight / 2, poleZOffset);
                 const pole2 = pole1.clone();
                 pole2.position.x = 0.5;
 
@@ -2136,7 +2680,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
         });
     }
 
-    // Add Flyers
     if (layoutDetails.flyers) {
         const flyerGeo = new THREE.PlaneGeometry(0.5, 0.5);
         state.geometriesToDispose.push(flyerGeo);
@@ -2166,6 +2709,13 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
             if (flyer.wall === 'E' || flyer.wall === 'W') {
                 mesh.rotation.y += Math.PI;
             }
+            
+            // FIX: Offset flyer slightly from the wall to prevent z-fighting with lighting effects.
+            const offsetVector = new THREE.Vector3(0, 0, 0.02); // Small forward offset
+            // Apply the mesh's final rotation to the offset vector to push it in the correct direction.
+            offsetVector.applyQuaternion(mesh.quaternion);
+            mesh.position.add(offsetVector);
+            
             layoutGroup.add(mesh);
         });
     }
@@ -2173,7 +2723,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
     addBillboard(layoutDetails.billboard, layoutGroup);
     addPoster(layoutDetails.street, layoutGroup);
 
-    const portalFrameMaterial = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9, roughness: 0.2, envMapIntensity: 0.5 }); state.materialsToDispose.push(portalFrameMaterial); const createPortalShowcase = (portalType: PortalType) => { const portalGroup = new THREE.Group(); const topCapGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.1, 32); state.geometriesToDispose.push(topCapGeo); const topCap = new THREE.Mesh(topCapGeo, portalFrameMaterial); topCap.position.y = 0.4; portalGroup.add(topCap); const baseGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.2, 32); state.geometriesToDispose.push(baseGeo); const base = new THREE.Mesh(baseGeo, portalFrameMaterial); base.position.y = -0.45; portalGroup.add(base); const energyGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.7, 32, 1, true); state.geometriesToDispose.push(energyGeo); const canvas = document.createElement('canvas'); canvas.width = 32; canvas.height = 128; const ctx = canvas.getContext('2d')!; ctx.strokeStyle = portalType === 'Red' ? '#ff8080' : '#80b3ff'; ctx.lineWidth = 3; ctx.globalAlpha = 0.5; for (let i = 0; i < 10; i++) { ctx.beginPath(); ctx.moveTo(Math.random() * 32, 0); ctx.lineTo(Math.random() * 32, 128); ctx.stroke(); } const energyTexture = new THREE.CanvasTexture(canvas); energyTexture.wrapS = THREE.RepeatWrapping; energyTexture.wrapT = THREE.RepeatWrapping; state.texturesToDispose.push(energyTexture); const energyMat = new THREE.MeshBasicMaterial({ map: energyTexture, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }); state.materialsToDispose.push(energyMat); const energyCylinder = new THREE.Mesh(energyGeo, energyMat); portalGroup.add(energyCylinder); const orbRadius = 0.15; const orbGeometry = new THREE.SphereGeometry(orbRadius, 16, 16); state.geometriesToDispose.push(orbGeometry); const orbTexture = createPortalTexture(portalType); state.texturesToDispose.push(orbTexture); const orbMaterial = new THREE.MeshStandardMaterial({ emissiveMap: orbTexture, emissive: 0xffffff, emissiveIntensity: 1.5, color: 0x000000, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, }); state.materialsToDispose.push(orbMaterial); const orb1 = new THREE.Mesh(orbGeometry, orbMaterial); orb1.layers.enable(BLOOM_LAYER); portalGroup.add(orb1); const orb2 = new THREE.Mesh(orbGeometry, orbMaterial.clone()); state.materialsToDispose.push(orb2.material as THREE.Material); orb2.layers.enable(BLOOM_LAYER); portalGroup.add(orb2); portalGroup.visible = false; return { group: portalGroup, orbs: [orb1, orb2], energyTexture }; };
+    const portalFrameMaterial = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9, roughness: 0.2, envMapIntensity: 0.5 }); state.materialsToDispose.push(portalFrameMaterial); const createPortalShowcase = (portalType: 'Red' | 'Blue') => { const portalGroup = new THREE.Group(); const topCapGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.1, 32); state.geometriesToDispose.push(topCapGeo); const topCap = new THREE.Mesh(topCapGeo, portalFrameMaterial); topCap.position.y = 0.4; portalGroup.add(topCap); const baseGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.2, 32); state.geometriesToDispose.push(baseGeo); const base = new THREE.Mesh(baseGeo, portalFrameMaterial); base.position.y = -0.45; portalGroup.add(base); const energyGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.7, 32, 1, true); state.geometriesToDispose.push(energyGeo); const canvas = document.createElement('canvas'); canvas.width = 32; canvas.height = 128; const ctx = canvas.getContext('2d')!; ctx.strokeStyle = portalType === 'Red' ? '#ff8080' : '#80b3ff'; ctx.lineWidth = 3; ctx.globalAlpha = 0.5; for (let i = 0; i < 10; i++) { ctx.beginPath(); ctx.moveTo(Math.random() * 32, 0); ctx.lineTo(Math.random() * 32, 128); ctx.stroke(); } const energyTexture = new THREE.CanvasTexture(canvas); energyTexture.wrapS = THREE.RepeatWrapping; energyTexture.wrapT = THREE.RepeatWrapping; state.texturesToDispose.push(energyTexture); const energyMat = new THREE.MeshBasicMaterial({ map: energyTexture, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }); state.materialsToDispose.push(energyMat); const energyCylinder = new THREE.Mesh(energyGeo, energyMat); portalGroup.add(energyCylinder); const orbRadius = 0.15; const orbGeometry = new THREE.SphereGeometry(orbRadius, 16, 16); state.geometriesToDispose.push(orbGeometry); const orbTexture = createPortalTexture(portalType); state.texturesToDispose.push(orbTexture); const orbMaterial = new THREE.MeshStandardMaterial({ emissiveMap: orbTexture, emissive: 0xffffff, emissiveIntensity: 1.5, color: 0x000000, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, }); state.materialsToDispose.push(orbMaterial); const orb1 = new THREE.Mesh(orbGeometry, orbMaterial); orb1.layers.enable(BLOOM_LAYER); portalGroup.add(orb1); const orb2 = new THREE.Mesh(orbGeometry, orbMaterial.clone()); state.materialsToDispose.push(orb2.material as THREE.Material); orb2.layers.enable(BLOOM_LAYER); portalGroup.add(orb2); portalGroup.visible = false; return { group: portalGroup, orbs: [orb1, orb2], energyTexture }; };
     
     layoutDetails.portals.forEach(portal => {
         const showcase = createPortalShowcase(portal.type);
@@ -2184,16 +2734,65 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
         state.portalGroups!.set(portal.id, showcase);
     });
 
-    // --- AD PLACEMENT LOGIC (FIXED) ---
+    if (buildingEdgeVertices.length > 0) {
+        const tubeRadius = 0.02;
+        const tubeGeo = new THREE.CylinderGeometry(tubeRadius, tubeRadius, 1, 8);
+        state.geometriesToDispose.push(tubeGeo);
+    
+        const tubeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        state.materialsToDispose.push(tubeMat);
+    
+        const numEdges = buildingEdgeVertices.length / 6;
+        const buildingNeonTubes = new THREE.InstancedMesh(tubeGeo, tubeMat, numEdges);
+        if(buildingNeonTubes.instanceColor) buildingNeonTubes.instanceColor.setUsage(THREE.DynamicDrawUsage);
+        buildingNeonTubes.layers.enable(BLOOM_LAYER);
+        layoutGroup.add(buildingNeonTubes);
+        
+        state.buildingEdgePositions = [];
+        const p1 = new THREE.Vector3();
+        const p2 = new THREE.Vector3();
+        const tubeDummy = new THREE.Object3D();
+        const defaultUp = new THREE.Vector3(0, 1, 0);
+    
+        for (let i = 0; i < numEdges; i++) {
+            p1.fromArray(buildingEdgeVertices, i * 6);
+            p2.fromArray(buildingEdgeVertices, i * 6 + 3);
+    
+            const length = p1.distanceTo(p2);
+            if (length < 0.01) continue;
+    
+            tubeDummy.position.lerpVectors(p1, p2, 0.5);
+            state.buildingEdgePositions.push(tubeDummy.position.clone());
+    
+            const direction = new THREE.Vector3().subVectors(p2, p1).normalize();
+            tubeDummy.quaternion.setFromUnitVectors(defaultUp, direction);
+            tubeDummy.scale.set(1, length, 1);
+            
+            tubeDummy.updateMatrix();
+            buildingNeonTubes.setMatrixAt(i, tubeDummy.matrix);
+            buildingNeonTubes.setColorAt(i, new THREE.Color(COLORS.GRID_LINES));
+        }
+        
+        buildingNeonTubes.instanceMatrix.needsUpdate = true;
+        if (buildingNeonTubes.instanceColor) {
+            buildingNeonTubes.instanceColor.needsUpdate = true;
+        }
+        state.buildingEdgesMesh = buildingNeonTubes;
+    }
+
+    const lightingSystem = new LightingSystem();
+    if(state.buildingEdgesMesh && state.buildingEdgePositions) {
+        lightingSystem.init(gridHelper, state.buildingEdgesMesh, state.buildingEdgePositions, layoutDetails);
+    }
+    state.lightingSystem = lightingSystem;
+
     if (approvedAds) {
         const today = new Date().toISOString().slice(0, 10);
         
-        // 1. Separate ads into paid and system pools
         const todaysPaidAds = approvedAds.filter(ad => !ad.orderNumber.includes('sys') && ad.scheduleDate === today);
         const systemAds = approvedAds.filter(ad => ad.orderNumber.includes('sys'));
         const displayedPaidOrderNumbers: string[] = [];
 
-        // 2. Collect and shuffle all available ad slots
         const availableSlots: { [key in AdType]?: THREE.Mesh[] } = { Billboard: [], Poster: [], Banner: [], Flyer: [], CosmeticBanner: [] };
         state.layoutGroup?.traverse(child => {
             if ((child instanceof THREE.Mesh || child instanceof THREE.Group) && child.userData.adType) {
@@ -2212,7 +2811,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
             if (slots) { for (let i = slots.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[slots[i], slots[j]] = [slots[j], slots[i]]; } }
         });
 
-        // 3. Define the texture application function
         const applyAdToMesh = (mesh: THREE.Mesh, ad: ApprovedAd) => {
              const material = mesh.material as THREE.MeshStandardMaterial;
              textureLoader.load(ad.imageUrl, texture => {
@@ -2227,7 +2825,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                   material.map = canvasTexture;
                   material.emissiveMap = canvasTexture;
                   material.transparent = isFlyerOrPoster;
-                  material.alphaTest = isFlyerOrPoster ? 0.1 : 0; // Helps with z-fighting on transparent edges
+                  material.alphaTest = isFlyerOrPoster ? 0.1 : 0;
                   material.emissiveIntensity = ad.adType === 'Banner' || ad.adType === 'Billboard' ? 0.6 : 0.5;
                   material.color.set(0xffffff);
                   material.needsUpdate = true;
@@ -2238,7 +2836,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
              }, undefined, () => console.error(`Failed to load ad image: ${ad.imageUrl}`));
         };
         
-        // 4. Place paid ads first, consuming slots as they are used.
         todaysPaidAds.forEach(ad => {
             const slotsForType = availableSlots[ad.adType];
             if (slotsForType && slotsForType.length > 0) {
@@ -2248,7 +2845,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
             }
         });
         
-        // 5. Place system ads in remaining empty slots.
         systemAds.forEach(ad => {
             const slotsForType = availableSlots[ad.adType];
             if (slotsForType && slotsForType.length > 0) {
@@ -2257,7 +2853,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
             }
         });
 
-        // 6. Place default posters on any remaining poster slots.
         const remainingPosterSlots = availableSlots['Poster'] || [];
         if (remainingPosterSlots.length > 0) {
             const defaultPosterUrls = [
@@ -2287,7 +2882,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
             });
         }
         
-        // 7. Setup Billboard Slideshow
         const setupSlideshow = async () => {
             if (!state.billboardScreen) return;
             const slides: { texture: THREE.Texture; duration: number }[] = [];
@@ -2313,7 +2907,6 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                 }
             };
     
-            // await processAndAddSlide('https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/3D%20Snake%20banner.jpg', 10000);
             await processAndAddSlide('https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/Snake%20banner.jpg', 10000);
     
             if (billboardData && billboardData.topScores.length > 0) {
@@ -2345,19 +2938,17 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
                 material.emissiveMap = state.billboardSlides[0].texture;
                 material.needsUpdate = true;
                 state.currentBillboardSlideIndex = 0;
-                state.lastBillboardSlideTime = performance.now();
+                state.lastBillboardSlideTime = Date.now();
             }
         };
         setupSlideshow();
         
-        // 8. Report only the paid ads that were displayed
         if (displayedPaidOrderNumbers.length > 0) {
             reportDisplayedAds([...new Set(displayedPaidOrderNumbers)]);
         }
     }
   }, [isSceneInitialized, layoutDetails, approvedAds, billboardData]);
 
-  // This useEffect handles dynamic graphics quality changes.
   useEffect(() => {
     const state = animationRef.current;
     if (!isSceneInitialized || !state.renderer || !state.bloomPass || !state.scene || !state.fruitMaterials) {
@@ -2368,14 +2959,11 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
     const directionalLight = scene.getObjectByProperty('isDirectionalLight', true) as THREE.DirectionalLight;
     if (!directionalLight) return;
     
-    // --- Define settings for each quality level ---
     const enableShadows = graphicsQuality === 'High';
     const enableBloom = graphicsQuality === 'High' || graphicsQuality === 'Medium';
 
-    // 1. Configure Shadows
     if (renderer.shadowMap.enabled !== enableShadows) {
         renderer.shadowMap.enabled = enableShadows;
-        // This requires recompilation of materials
         scene.traverse(obj => {
             if (obj instanceof THREE.Mesh && obj.material) {
                 const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
@@ -2384,7 +2972,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
         });
     }
     directionalLight.castShadow = enableShadows;
-    const shadowMapSize = 1024; // Use optimized size for High, doesn't matter for others.
+    const shadowMapSize = 1024;
     if (directionalLight.shadow.mapSize.width !== shadowMapSize && enableShadows) {
         directionalLight.shadow.mapSize.width = shadowMapSize;
         directionalLight.shadow.mapSize.height = shadowMapSize;
@@ -2394,21 +2982,22 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
         }
     }
     
-    // 2. Configure Bloom
     bloomPass.enabled = enableBloom;
     if (enableBloom) {
-        // Medium and High get full-res bloom. The performance difference comes from shadows being off on Medium.
         const { width, height } = renderer.getSize(new THREE.Vector2());
         bloomPass.resolution.set(width, height);
         bloomPass.strength = 0.8;
         bloomPass.radius = 0.4;
-        bloomPass.threshold = 0.3; // Lower threshold catches more subtle glows, fixing the Medium preset issue.
+        bloomPass.threshold = 0.3;
     }
 
-    // 3. Configure Apple Material for Low Quality
     const appleMat = state.fruitMaterials.get(FruitType.APPLE) as THREE.MeshStandardMaterial;
     if (appleMat) {
-        appleMat.emissiveIntensity = graphicsQuality === 'Low' ? 1.5 : 0.7;
+        const isLowQuality = graphicsQuality === 'Low';
+        appleMat.emissiveIntensity = isLowQuality ? 1.5 : 0.7;
+        appleMat.transparent = !isLowQuality;
+        appleMat.opacity = isLowQuality ? 1.0 : 0.7;
+        appleMat.needsUpdate = true;
     }
 
   }, [graphicsQuality, isSceneInitialized]);
@@ -2418,9 +3007,9 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, s
 
 const chooseNextDroneAction = (animState: typeof Board.prototype.animationRef.current, startPos: THREE.Vector3, startQuat: THREE.Quaternion): DroneState => {
     const { bannerMeshes, snakeHead, layoutDetails, maxBuildingHeight, reusable, billboardScreen } = animState;
-    if (!layoutDetails || !reusable) { // Safety check
+    if (!layoutDetails || !reusable) {
       const idleAction = { type: 'IDLE' } as DroneAction;
-      return { startTime: performance.now(), startPos, startQuat, targetPos: startPos, targetQuat: startQuat, approachDuration: 0, mainActionDuration: 2000, totalDuration: 2000, arcHeight: 0, mainAction: idleAction };
+      return { startTime: Date.now(), startPos, startQuat, targetPos: startPos, targetQuat: startQuat, approachDuration: 0, mainActionDuration: 2000, totalDuration: 2000, arcHeight: 0, mainAction: idleAction };
     }
 
     const actions = [
@@ -2447,11 +3036,8 @@ const chooseNextDroneAction = (animState: typeof Board.prototype.animationRef.cu
         random -= action.weight;
     }
 
-    // Fallback if a chosen action is not possible
     if (choice === 'BILLBOARD' && !billboardScreen) choice = 'MOVING';
     if (choice === 'BANNER_ORBIT' && (!bannerMeshes || bannerMeshes.length === 0)) choice = 'MOVING';
-
-    // console.log(`Red Drone starting action: ${choice}`);
 
     let mainAction: DroneAction;
     let targetPos = new THREE.Vector3();
@@ -2463,28 +3049,19 @@ const chooseNextDroneAction = (animState: typeof Board.prototype.animationRef.cu
         case 'WALL_RUN': {
             const walls = ['N', 'S', 'E', 'W'] as const;
             const wall = walls[animState.wallRunCycleIndex];
-            animState.wallRunCycleIndex = (animState.wallRunCycleIndex + 1) % 4; // Cycle to next wall for next time
+            animState.wallRunCycleIndex = (animState.wallRunCycleIndex + 1) % 4;
             
-            const trackOffset = 1.8; // How far from the wall the drone will fly
-            const altitude = 1.8; // Altitude to focus on banners/flyers
+            const trackOffset = 1.8;
+            const altitude = 1.8;
             const goForward = Math.random() > 0.2;
 
             let point1 = new THREE.Vector3();
             let point2 = new THREE.Vector3();
 
-            if (wall === 'N') {
-                point1.set(PLAYABLE_AREA_MIN_X + 1, altitude, PLAYABLE_AREA_MIN_Z + trackOffset);
-                point2.set(PLAYABLE_AREA_MAX_X - 1, altitude, PLAYABLE_AREA_MIN_Z + trackOffset);
-            } else if (wall === 'S') {
-                point1.set(PLAYABLE_AREA_MAX_X - 1, altitude, PLAYABLE_AREA_MAX_Z - trackOffset);
-                point2.set(PLAYABLE_AREA_MIN_X + 1, altitude, PLAYABLE_AREA_MAX_Z - trackOffset);
-            } else if (wall === 'W') {
-                point1.set(PLAYABLE_AREA_MIN_X + trackOffset, altitude, PLAYABLE_AREA_MAX_Z - 1);
-                point2.set(PLAYABLE_AREA_MIN_X + trackOffset, altitude, PLAYABLE_AREA_MIN_Z + 1);
-            } else { // E
-                point1.set(PLAYABLE_AREA_MAX_X - trackOffset, altitude, PLAYABLE_AREA_MIN_Z + 1);
-                point2.set(PLAYABLE_AREA_MAX_X - trackOffset, altitude, PLAYABLE_AREA_MAX_Z - 1);
-            }
+            if (wall === 'N') { point1.set(PLAYABLE_AREA_MIN_X + 1, altitude, PLAYABLE_AREA_MIN_Z + trackOffset); point2.set(PLAYABLE_AREA_MAX_X - 1, altitude, PLAYABLE_AREA_MIN_Z + trackOffset); }
+            else if (wall === 'S') { point1.set(PLAYABLE_AREA_MAX_X - 1, altitude, PLAYABLE_AREA_MAX_Z - trackOffset); point2.set(PLAYABLE_AREA_MIN_X + 1, altitude, PLAYABLE_AREA_MAX_Z - trackOffset); }
+            else if (wall === 'W') { point1.set(PLAYABLE_AREA_MIN_X + trackOffset, altitude, PLAYABLE_AREA_MAX_Z - 1); point2.set(PLAYABLE_AREA_MIN_X + trackOffset, altitude, PLAYABLE_AREA_MIN_Z + 1); }
+            else { point1.set(PLAYABLE_AREA_MAX_X - trackOffset, altitude, PLAYABLE_AREA_MIN_Z + 1); point2.set(PLAYABLE_AREA_MAX_X - trackOffset, altitude, PLAYABLE_AREA_MAX_Z - 1); }
             
             const runStart = goForward ? point1 : point2;
             const runEnd = goForward ? point2 : point1;
@@ -2502,18 +3079,15 @@ const chooseNextDroneAction = (animState: typeof Board.prototype.animationRef.cu
             const center = new THREE.Vector3();
             banner.getWorldPosition(center);
             
-            // This is the fix: Calculate normal by pointing from banner to the world's Y-axis.
-            // This is robust against negative scaling of the banner mesh, which was causing issues.
             const normal = new THREE.Vector3(0, center.y, 0).sub(center);
             normal.y = 0;
             normal.normalize();
 
             const radius = 2.0;
             const arcDirection = Math.random() > 0.5 ? 1 : -1;
-            const arc = (Math.PI * 2 / 3) * arcDirection; // 120 degrees, random direction
+            const arc = (Math.PI * 2 / 3) * arcDirection;
             const startAngle = -arc / 2;
 
-            // Calculate tangent for orbit plane (perpendicular to normal on XZ plane)
             const tangent = new THREE.Vector3(-normal.z, 0, normal.x).normalize();
             const orbitStartPos = center.clone()
                 .addScaledVector(normal, Math.cos(startAngle) * radius)
@@ -2542,8 +3116,7 @@ const chooseNextDroneAction = (animState: typeof Board.prototype.animationRef.cu
             const cruiseEndPos = billboardLookAt.clone().addScaledVector(billboardNormal, 2.0);
             const cruiseStartPos = billboardLookAt.clone().addScaledVector(billboardNormal, 7.0);
             
-            // Elevate drone to be level with the top of the billboard frame.
-            const frameHeight = 1.6; // This is defined in addBillboard
+            const frameHeight = 1.6;
             const topOfBillboardY = billboardLookAt.y + (frameHeight / 1.5);
             cruiseEndPos.y = topOfBillboardY;
             cruiseStartPos.y = topOfBillboardY;
@@ -2551,7 +3124,7 @@ const chooseNextDroneAction = (animState: typeof Board.prototype.animationRef.cu
             targetPos.copy(cruiseStartPos);
             mainAction = { type: 'BILLBOARD_APPROACH', startPos: cruiseStartPos, endPos: cruiseEndPos, lookAt: billboardLookAt };
             approachDuration = (startPos.distanceTo(targetPos) / 3.5) * 1000;
-            mainActionDuration = 8000; // 8 second slow cruise
+            mainActionDuration = 8000;
             break;
         }
 
@@ -2567,15 +3140,15 @@ const chooseNextDroneAction = (animState: typeof Board.prototype.animationRef.cu
 
         case 'PANORAMIC_DIVE': {
             const highAltitude = maxBuildingHeight + 5;
-            targetPos.set(0, highAltitude, 0); // Approach target is the peak.
+            targetPos.set(0, highAltitude, 0);
             mainAction = {
                 type: 'PANORAMIC_DIVE',
                 phase: 'ASCENDING',
-                phaseStartTime: 0, // Will be set in animate loop
+                phaseStartTime: 0,
             };
-            approachDuration = 6000; // 6s climb.
-            mainActionDuration = 2000 + 10000 + 7000; // Hover + Rotate + Dive.
-            arcHeight = 2.0; // Gentle arc on the way up.
+            approachDuration = 6000;
+            mainActionDuration = 2000 + 10000 + 7000;
+            arcHeight = 2.0;
             break;
         }
 
@@ -2591,7 +3164,7 @@ const chooseNextDroneAction = (animState: typeof Board.prototype.animationRef.cu
             mainAction = { type: 'ROTATE', arc };
             targetPos.copy(startPos);
             approachDuration = 0;
-            mainActionDuration = Math.abs(arc / (Math.PI * 2)) * 5000; // Duration proportional to rotation
+            mainActionDuration = Math.abs(arc / (Math.PI * 2)) * 5000;
             break;
         }
             
@@ -2620,11 +3193,9 @@ const chooseNextDroneAction = (animState: typeof Board.prototype.animationRef.cu
         targetQuat = startQuat.clone();
     } else {
         let lookAtPoint: THREE.Vector3;
-        if (choice === 'BANNER_ORBIT') {
-            lookAtPoint = (mainAction as any).center;
-        } else if (choice === 'BILLBOARD') {
-            lookAtPoint = (mainAction as any).lookAt;
-        } else if (choice === 'WALL_RUN') {
+        if (choice === 'BANNER_ORBIT') { lookAtPoint = (mainAction as any).center; }
+        else if (choice === 'BILLBOARD') { lookAtPoint = (mainAction as any).lookAt; }
+        else if (choice === 'WALL_RUN') {
             const wall = (mainAction as any).wall;
             const lookAtDir = new THREE.Vector3();
             if (wall === 'N') lookAtDir.set(0, 0, -1);
@@ -2633,7 +3204,7 @@ const chooseNextDroneAction = (animState: typeof Board.prototype.animationRef.cu
             else lookAtDir.set(1, 0, 0);
             lookAtPoint = targetPos.clone().add(lookAtDir);
         } else {
-            lookAtPoint = reusable.localPos.subVectors(targetPos, startPos).normalize().add(targetPos); // Look forward
+            lookAtPoint = reusable.localPos.subVectors(targetPos, startPos).normalize().add(targetPos);
         }
         reusable.droneLookAtHelper!.position.copy(targetPos);
         reusable.droneLookAtHelper!.lookAt(lookAtPoint);
@@ -2643,7 +3214,7 @@ const chooseNextDroneAction = (animState: typeof Board.prototype.animationRef.cu
     const totalDuration = approachDuration + mainActionDuration;
 
     return {
-        startTime: performance.now(),
+        startTime: Date.now(),
         startPos, startQuat,
         targetPos, targetQuat,
         approachDuration,

@@ -34,7 +34,7 @@ const Controls: React.FC<ControlsProps> = ({ onTurnLeft, onTurnRight, gameState,
   const backgroundClass = isPaused ? 'bg-black/50' : 'bg-black/20'; // Paused: darker. Gameplay: more transparent.
   const iconOpacityClass = isPaused ? 'opacity-50' : 'opacity-90';
 
-  const controlClass = `flex-1 h-20 ${backgroundClass} backdrop-blur-sm flex items-center justify-center transition-colors duration-200 rounded-lg`;
+  const controlClass = `w-1/3 h-20 ${backgroundClass} backdrop-blur-sm flex items-center justify-center transition-colors duration-200 rounded-lg`;
   const activeClass = 'bg-cyan-500/30';
   
   // Removed the global opacity change for the paused state. Now only cursor changes.
@@ -42,7 +42,7 @@ const Controls: React.FC<ControlsProps> = ({ onTurnLeft, onTurnRight, gameState,
 
   return (
     <div
-      className="absolute bottom-0 left-0 w-full z-10 flex items-center justify-stretch gap-2 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]"
+      className="absolute bottom-0 left-0 w-full z-10 flex items-center justify-between p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]"
       role="group"
       aria-label="Movement Controls"
     >

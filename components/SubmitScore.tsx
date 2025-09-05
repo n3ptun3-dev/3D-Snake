@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { DeviceType, UserDTO } from '../types';
 import { isMobile } from '../utils/device';
 import { getGeoInfo, submitScore } from '../utils/leaderboard';
-import { SpinnerIcon, TrophyIcon } from './icons';
+import { SpinnerIcon } from './icons';
 import { piService } from '../utils/pi';
 
 interface SubmitScoreProps {
@@ -14,9 +14,10 @@ interface SubmitScoreProps {
   onClose: () => void;
   requestPiAuth: (onSuccess: () => void) => void;
   isRotated: boolean;
+  isForLeaderboard: boolean;
 }
 
-const SubmitScore: React.FC<SubmitScoreProps> = ({ scoreData, onClose, requestPiAuth, isRotated }) => {
+const SubmitScore: React.FC<SubmitScoreProps> = ({ scoreData, onClose, requestPiAuth, isRotated, isForLeaderboard }) => {
   const [name, setName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,13 +80,13 @@ const SubmitScore: React.FC<SubmitScoreProps> = ({ scoreData, onClose, requestPi
         <div className="flex-grow overflow-y-auto p-4 sm:p-6 text-center text-white">
           {submitSuccess ? (
             <div>
-              <TrophyIcon className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-green-400" />
+              <img src="https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/trophy.png" alt="Success Trophy" className="w-12 h-12 sm:w-16 sm:h-16 mx-auto" />
               <h2 id="submit-score-title" className="text-xl sm:text-2xl font-bold mt-2 sm:mt-4 text-green-400">Success!</h2>
               <p className="mt-2 text-neutral-300">Your score has been submitted to the leaderboard!</p>
             </div>
-          ) : (
+          ) : isForLeaderboard ? (
             <>
-              <TrophyIcon className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-yellow-300" />
+              <img src="https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/trophy.png" alt="High Score Trophy" className="w-12 h-12 sm:w-16 sm:h-16 mx-auto" />
               <h2 id="submit-score-title" className="text-xl sm:text-2xl font-bold mt-2 sm:mt-4">New High Score!</h2>
               <p className="mt-2 text-neutral-300">You've made it to the leaderboard! Enter your name to save your score.</p>
               <p className="text-3xl sm:text-4xl font-bold my-2 sm:my-4 text-cyan-300">{scoreData.score.toLocaleString()}</p>
@@ -120,6 +121,20 @@ const SubmitScore: React.FC<SubmitScoreProps> = ({ scoreData, onClose, requestPi
                   </button>
                 </div>
               </form>
+            </>
+          ) : (
+            <>
+              <img src="https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/trophy.png" alt="High Score Trophy" className="w-12 h-12 sm:w-16 sm:h-16 mx-auto" />
+              <h2 id="submit-score-title" className="text-xl sm:text-2xl font-bold mt-2 sm:mt-4">New High Score!</h2>
+              <p className="mt-2 text-neutral-300">Congratulations on setting a new personal best.</p>
+              <p className="text-3xl sm:text-4xl font-bold my-2 sm:my-4 text-cyan-300">{scoreData.score.toLocaleString()}</p>
+              <button
+                  type="button"
+                  onClick={onClose}
+                  className="w-full mt-4 sm:mt-6 px-4 py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-lg transition-colors"
+              >
+                  Continue
+              </button>
             </>
           )}
         </div>

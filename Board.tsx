@@ -1,6 +1,5 @@
 
-
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -482,6 +481,7 @@ const createQuantumRooftopIcon = (state: any): THREE.Group => {
 
 const Board: React.FC<BoardProps> = ({ gameState, zoom, cameraView, snakeSegments, snakeRotation, fruits, gameSpeed, layoutDetails, isCrashing, isPassageFruitActive, passageFruitLocation }) => {
   const mountRef = useRef<HTMLDivElement>(null);
+  const [isSceneInitialized, setIsSceneInitialized] = useState(false);
 
   const animationRef = useRef<{
     renderer?: THREE.WebGLRenderer;
@@ -636,7 +636,7 @@ const Board: React.FC<BoardProps> = ({ gameState, zoom, cameraView, snakeSegment
   // This useEffect handles the fly-in animation when the game starts.
   useEffect(() => {
       const state = animationRef.current;
-      if (gameState === 'Starting' && snakeSegments.length > 0 && state.camera) {
+      if (isSceneInitialized && gameState === 'Starting' && snakeSegments.length > 0 && state.camera && state.reusable) {
           state.startAnim = undefined; // Clear any previous animation state
           
           const head = snakeSegments[0];
@@ -661,7 +661,7 @@ const Board: React.FC<BoardProps> = ({ gameState, zoom, cameraView, snakeSegment
               endLookAt,
           };
       }
-  }, [gameState, snakeSegments, offsetX, offsetZ]);
+  }, [gameState, snakeSegments, offsetX, offsetZ, isSceneInitialized]);
 
   // This useEffect runs once to initialize the Three.js scene, renderer, camera, etc.
   useEffect(() => {
@@ -1159,6 +1159,7 @@ const Board: React.FC<BoardProps> = ({ gameState, zoom, cameraView, snakeSegment
           currentScene.background = null; currentScene.traverse(darkenNonBloomed); currentBloomComposer.render(); currentScene.traverse(restoreMaterials); currentScene.background = new THREE.Color(skyColor); finalComposer.render();
         };
         animate();
+        setIsSceneInitialized(true);
 
         const handleResize = () => {
             const state = animationRef.current;

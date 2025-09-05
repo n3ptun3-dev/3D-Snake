@@ -3,7 +3,7 @@ import audioManager from '../sounds';
 import { 
     MusicOnIcon, MusicOffIcon, SfxOnIcon, SfxOffIcon,
     PlayIcon, PauseIcon, FullScreenEnterIcon, FullScreenExitIcon,
-    HeartIcon, SpeedIcon, TrophyIcon, CameraIcon,
+    HeartIcon, SpeedIcon, PodiumIcon, CameraIcon, EyeIcon,
     SpeedBoostIcon, SlowDownIcon, MagnetIcon, ScoreDoublerIcon, TripleIcon, RadioIcon,
     ChevronUpIcon, ChevronDownIcon, MegaphoneIcon, BurgerMenuIcon, RotateIcon
 } from './icons';
@@ -36,6 +36,7 @@ interface GameHUDProps {
     flashMessage: string | null;
     cameraView: CameraView;
     onCycleCamera: () => void;
+    onToggleGameplayView: () => void;
     isHudContentVisible: boolean;
     setIsHudContentVisible: (visible: boolean) => void;
     onResetToWelcome: () => void;
@@ -49,6 +50,8 @@ interface GameHUDProps {
     isPiBrowser: boolean;
     isRotated: boolean;
     onToggleRotate: () => void;
+    isSettingsOpen: boolean;
+    isGameOverHudVisible: boolean;
 }
 
 const ControlButton: React.FC<{
@@ -160,9 +163,9 @@ const GameHUD: React.FC<GameHUDProps> = ({
     gameState, isPaused, onTogglePause, isFullScreen, onToggleFullScreen, 
     score, level, lives, gameSpeed, onStartGame, topSpeed, highScore, isWelcomePanelVisible, activeEffects,
     onOpenLeaderboard, onOpenSettings, onOpenGraphicsSettings, onOpenAmi, onOpenHowToPlay, musicSource, currentStation, flashMessage,
-    cameraView, onCycleCamera, isHudContentVisible, setIsHudContentVisible, onResetToWelcome, onOpenFeedback,
+    cameraView, onCycleCamera, onToggleGameplayView, isHudContentVisible, setIsHudContentVisible, onResetToWelcome, onOpenFeedback,
     onOpenJoinPi, onOpenAboutSpi, onOpenCredits, onOpenTerms, onOpenPrivacyPolicy, piUser,
-    isPiBrowser, isRotated, onToggleRotate
+    isPiBrowser, isRotated, onToggleRotate, isSettingsOpen, isGameOverHudVisible
 }) => {
     const [muteState, setMuteState] = useState(audioManager.getMuteState());
     const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -172,7 +175,7 @@ const GameHUD: React.FC<GameHUDProps> = ({
     const isPlaying = gameState === 'Playing';
     const isWelcome = gameState === 'Welcome';
     const isGameOver = gameState === 'GameOver';
-    const isExpanded = (isWelcome && isWelcomePanelVisible) || isGameOver || isPaused;
+    const isExpanded = (isWelcome && isWelcomePanelVisible) || (isGameOver && isGameOverHudVisible) || isPaused;
 
     useEffect(() => {
         const unsubscribe = audioManager.subscribe(() => setMuteState(audioManager.getMuteState()));
@@ -249,7 +252,7 @@ const GameHUD: React.FC<GameHUDProps> = ({
                     {isGameOver ? 'Play Again' : 'Start Game'}
                 </button>
                 <button onClick={onOpenLeaderboard} className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white font-bold rounded-lg text-lg transition-transform transform hover:scale-105 flex items-center gap-2">
-                    <TrophyIcon className="w-5 h-5" /> Leaderboard
+                    <PodiumIcon className="w-5 h-5" /> Leaderboard
                 </button>
             </div>
             <button
@@ -320,15 +323,23 @@ const GameHUD: React.FC<GameHUDProps> = ({
                         {/* Left side */}
                         <div className="flex items-center gap-x-2 flex-1 min-w-0">
                            {!useSideLayout && (
-                                isPiBrowser ? (
-                                    <ControlButton onClick={onToggleRotate} isToggled={isRotated} onIcon={<RotateIcon className="w-5 h-5" />} offIcon={<RotateIcon className="w-5 h-5" />} aria-label={isRotated ? "Rotate to Portrait" : "Rotate to Landscape"} className="w-10 h-10" />
-                                ) : (
-                                    <>
+                                <>
+                                    {isPiBrowser ? (
+                                        <ControlButton onClick={onToggleRotate} isToggled={isRotated} onIcon={<RotateIcon className="w-5 h-5" />} offIcon={<RotateIcon className="w-5 h-5" />} aria-label={isRotated ? "Rotate to Portrait" : "Rotate to Landscape"} className="w-10 h-10" />
+                                    ) : (
                                         <ControlButton onClick={onToggleFullScreen} isToggled={isFullScreen} onIcon={<FullScreenEnterIcon className="w-5 h-5" />} offIcon={<FullScreenExitIcon className="w-5 h-5" />} aria-label={isFullScreen ? "Exit Fullscreen" : "Enter Fullscreen"} className="w-10 h-10" />
-                                        {/* Temporary Rotate Button for development */}
-                                        {/* <ControlButton onClick={onToggleRotate} isToggled={isRotated} onIcon={<RotateIcon className="w-5 h-5" />} offIcon={<RotateIcon className="w-5 h-5" />} aria-label={isRotated ? "Rotate to Portrait" : "Rotate to Landscape"} className="w-10 h-10" /> */}
-                                    </>
-                                )
+                                    )}
+                                    {(isPlaying || isPaused) && (
+                                        <ControlButton 
+                                            onClick={onToggleGameplayView}
+                                            isToggled={cameraView === CameraView.THIRD_PERSON}
+                                            onIcon={<EyeIcon className="w-5 h-5" />} 
+                                            offIcon={<EyeIcon className="w-5 h-5" />} 
+                                            aria-label="Toggle Gameplay Camera"
+                                            className={`w-10 h-10 ${cameraView === CameraView.THIRD_PERSON ? 'bg-cyan-500/30' : ''}`}
+                                        />
+                                    )}
+                                </>
                            )}
                            {(isPlaying && !isPaused) ? (
                                <div className="flex items-center justify-start gap-x-3 sm:gap-x-4 text-base sm:text-lg font-semibold">
@@ -401,11 +412,17 @@ const GameHUD: React.FC<GameHUDProps> = ({
                         {isPiBrowser ? (
                             <ControlButton onClick={onToggleRotate} isToggled={isRotated} onIcon={<RotateIcon className="w-5 h-5" />} offIcon={<RotateIcon className="w-5 h-5" />} aria-label={isRotated ? "Rotate to Portrait" : "Rotate to Landscape"} className="w-10 h-10" />
                         ) : (
-                           <>
-                                <ControlButton onClick={onToggleFullScreen} isToggled={isFullScreen} onIcon={<FullScreenEnterIcon className="w-5 h-5" />} offIcon={<FullScreenExitIcon className="w-5 h-5" />} aria-label={isFullScreen ? "Exit Fullscreen" : "Enter Fullscreen"} className="w-10 h-10" />
-                                {/* Temporary Rotate Button for development */}
-                                {/* <ControlButton onClick={onToggleRotate} isToggled={isRotated} onIcon={<RotateIcon className="w-5 h-5" />} offIcon={<RotateIcon className="w-5 h-5" />} aria-label={isRotated ? "Rotate to Portrait" : "Rotate to Landscape"} className="w-10 h-10" /> */}
-                            </>
+                           <ControlButton onClick={onToggleFullScreen} isToggled={isFullScreen} onIcon={<FullScreenEnterIcon className="w-5 h-5" />} offIcon={<FullScreenExitIcon className="w-5 h-5" />} aria-label={isFullScreen ? "Exit Fullscreen" : "Enter Fullscreen"} className="w-10 h-10" />
+                        )}
+                        {(isPlaying || isPaused) && (
+                            <ControlButton 
+                                onClick={onToggleGameplayView}
+                                isToggled={cameraView === CameraView.THIRD_PERSON}
+                                onIcon={<EyeIcon className="w-5 h-5" />} 
+                                offIcon={<EyeIcon className="w-5 h-5" />} 
+                                aria-label="Toggle Gameplay Camera"
+                                className={`w-10 h-10 ${cameraView === CameraView.THIRD_PERSON ? 'bg-cyan-500/30' : ''}`}
+                            />
                         )}
                         {(isExpanded && !isPlaying) && (
                             <>
@@ -435,38 +452,51 @@ const GameHUD: React.FC<GameHUDProps> = ({
                 </>
             )}
 
-            {/* Menu Toggle Button */}
-            {isExpanded && isHudContentVisible && (
-                <div className="absolute top-4 left-4 z-40">
-                    <button
-                        onClick={() => setIsMenuOpen(true)}
-                        className="p-2 w-12 h-12 bg-black/50 rounded-full text-white backdrop-blur-sm transition-all duration-300 hover:bg-black/70 hover:scale-110 flex justify-center items-center"
-                        aria-label="Open menu"
-                    >
-                        <BurgerMenuIcon className="w-6 h-6" />
-                    </button>
-                </div>
-            )}
-
-            {/* HUD Visibility Toggle Button */}
+            {/* HUD Visibility Toggle Button & Collapsed Camera Cycle */}
             {isExpanded && showCollapseButton && (
-                <div className="absolute top-4 right-4 z-40 flex gap-2">
+                <>
+                    <button
+                        onClick={() => setIsHudContentVisible(!isHudContentVisible)}
+                        className="absolute top-4 left-4 z-40 p-2 w-12 h-12 bg-black/50 rounded-full text-white backdrop-blur-sm transition-all duration-300 hover:bg-black/70 hover:scale-110 flex justify-center items-center"
+                        aria-label={isHudContentVisible ? "Hide menu" : "Show menu"}
+                    >
+                        {isHudContentVisible ? <ChevronUpIcon className="w-6 h-6" /> : <ChevronDownIcon className="w-6 h-6" />}
+                    </button>
+
                     {!isHudContentVisible && (
                          <button
                             onClick={onCycleCamera}
-                            className="p-2 w-auto h-12 bg-black/50 rounded-full text-white backdrop-blur-sm transition-all duration-300 hover:bg-black/70 hover:scale-110 flex justify-center items-center px-4"
+                            className="absolute top-4 left-20 z-40 p-2 w-auto h-12 bg-black/50 rounded-full text-white backdrop-blur-sm transition-all duration-300 hover:bg-black/70 hover:scale-110 flex justify-center items-center px-4"
                             aria-label={`Cycle camera view. Current view: ${cameraView}`}
                         >
                            <CameraIcon className="w-6 h-6 mr-2" />
                            <span className="font-semibold text-sm">{cameraView}</span>
                         </button>
                     )}
+                </>
+            )}
+            
+            {/* Collapsed Radio Indicator */}
+            {(isExpanded && !isHudContentVisible) && (musicSource === 'radio' || musicSource === 'saved') && currentStation && !muteState.isMusicMuted && (
+                <button
+                    onClick={() => onOpenSettings()}
+                    className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 min-w-0 max-w-xs p-2 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-sm transition-colors cursor-pointer z-40"
+                    aria-label={`Now playing: ${currentStation.name}. Click to open music settings.`}
+                >
+                    <img src={currentStation.favicon} alt="" className="w-5 h-5 rounded-sm flex-shrink-0" onError={(e) => e.currentTarget.style.display = 'none'} />
+                    <span className="text-sm font-semibold truncate text-neutral-300">{currentStation.name}</span>
+                </button>
+            )}
+
+            {/* Menu Toggle Button */}
+            {isExpanded && isHudContentVisible && (
+                <div className="absolute top-4 right-4 z-40">
                     <button
-                        onClick={() => setIsHudContentVisible(!isHudContentVisible)}
+                        onClick={() => setIsMenuOpen(true)}
                         className="p-2 w-12 h-12 bg-black/50 rounded-full text-white backdrop-blur-sm transition-all duration-300 hover:bg-black/70 hover:scale-110 flex justify-center items-center"
-                        aria-label={isHudContentVisible ? "Hide menu" : "Show menu"}
+                        aria-label="Open menu"
                     >
-                        {isHudContentVisible ? <ChevronUpIcon className="w-6 h-6" /> : <ChevronDownIcon className="w-6 h-6" />}
+                        <BurgerMenuIcon className="w-6 h-6" />
                     </button>
                 </div>
             )}

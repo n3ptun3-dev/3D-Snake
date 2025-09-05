@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { LeaderboardEntry, DeviceType } from '../types';
 import { fetchLeaderboard, countryCodeToFlag, formatTimeAgo } from '../utils/leaderboard';
 import { isMobile } from '../utils/device';
-import { XIcon, SpinnerIcon, MobileIcon, DesktopComputerIcon, TrophyIcon } from './icons';
+import { XIcon, SpinnerIcon, MobileIcon, DesktopComputerIcon, PodiumIcon } from './icons';
 
 interface LeaderboardProps {
   onClose: () => void;
@@ -94,7 +94,7 @@ const Leaderboard: React.FC<LeaderboardProps> = ({ onClose, onLeaderboardUpdate,
         {/* Header */}
         <header className="flex items-center justify-between p-4 border-b border-neutral-700 flex-shrink-0">
           <h2 id="leaderboard-title" className="text-xl sm:text-2xl font-bold text-yellow-300 flex items-center gap-2">
-            <TrophyIcon className="w-7 h-7" />
+            <PodiumIcon className="w-7 h-7" />
             Leaderboard
           </h2>
           <button

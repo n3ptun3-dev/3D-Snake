@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { RadioStation, RadioBrowserStation } from '../types';
 import { XIcon, MusicOnIcon, MusicOffIcon, StarIcon, StarOutlineIcon } from './icons';
 import { isMobile } from '../utils/device';
@@ -22,20 +22,43 @@ interface SettingsProps {
     onIsBackgroundPlayEnabledChange: (enabled: boolean) => void;
     savedStations: RadioStation[];
     onToggleSaveStation: (station: RadioStation | null) => void;
+    showBackdrop?: boolean;
+    radioPlaybackError: string | null;
+    onClearRadioPlaybackError: () => void;
 }
 
 const Settings: React.FC<SettingsProps> = ({ 
     onClose, musicSource, onMusicSourceChange, currentStation, onStationSelect,
     radioSearchTerm, onRadioSearchTermChange, radioStations, isRadioLoading, radioError, searchRadioStations,
-    isRotated, isBackgroundPlayEnabled, onIsBackgroundPlayEnabledChange, savedStations, onToggleSaveStation
+    isRotated, isBackgroundPlayEnabled, onIsBackgroundPlayEnabledChange, savedStations, onToggleSaveStation,
+    showBackdrop = true, radioPlaybackError, onClearRadioPlaybackError
 }) => {
     
     const [muteState, setMuteState] = useState(audioManager.getMuteState());
+    const modalRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         const unsubscribe = audioManager.subscribe(() => setMuteState(audioManager.getMuteState()));
         return () => unsubscribe();
     }, []);
+    
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
+                onClose();
+            }
+        };
+
+        if (!showBackdrop) {
+            const timerId = setTimeout(() => {
+                document.addEventListener('mousedown', handleClickOutside);
+            }, 0);
+            return () => {
+                clearTimeout(timerId);
+                document.removeEventListener('mousedown', handleClickOutside);
+            };
+        }
+    }, [onClose, showBackdrop]);
     
     const isCurrentStationSaved = useMemo(() => {
         if (!currentStation) return false;
@@ -55,6 +78,9 @@ const Settings: React.FC<SettingsProps> = ({
             <span className="text-white">{label}</span>
         </label>
     );
+    
+    const backdropClass = showBackdrop ? "bg-black/80 backdrop-blur-md" : "bg-transparent pointer-events-none";
+    const modalClass = showBackdrop ? "" : "pointer-events-auto";
 
     const containerClasses = isRotated
         ? 'h-full max-h-md w-auto max-w-[90dvw]'
@@ -62,12 +88,12 @@ const Settings: React.FC<SettingsProps> = ({
 
     return (
         <div
-            className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center font-sans p-4"
+            className={`fixed inset-0 z-50 flex items-center justify-center font-sans p-4 ${backdropClass}`}
             role="dialog"
             aria-modal="true"
             aria-labelledby="settings-title"
         >
-            <div className={`bg-neutral-900/90 border border-neutral-700 rounded-2xl shadow-2xl flex flex-col ${containerClasses}`}>
+            <div ref={modalRef} className={`relative bg-neutral-900/90 border border-neutral-700 rounded-2xl shadow-2xl flex flex-col ${modalClass} ${containerClasses}`}>
                 <header className="flex items-center justify-between p-6 pb-4 flex-shrink-0">
                     <h2 id="settings-title" className="text-xl font-bold text-white">Music Settings</h2>
                     <button
@@ -81,24 +107,17 @@ const Settings: React.FC<SettingsProps> = ({
 
                 <div className="flex-grow overflow-y-auto px-6 pb-6 pt-2">
                     <div className="space-y-4">
-                        <label className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-white/5 -mx-2">
-                            <input
-                                type="checkbox"
-                                checked={isBackgroundPlayEnabled}
-                                onChange={(e) => onIsBackgroundPlayEnabledChange(e.target.checked)}
-                                className="w-4 h-4 text-cyan-500 bg-neutral-700 border-neutral-500 rounded focus:ring-cyan-500 focus:ring-offset-neutral-900"
-                            />
-                            <span className="text-white text-sm">Continue playing radio in background</span>
-                        </label>
-
-                        <div>
-                            <h3 className="text-lg font-semibold text-neutral-300 mb-2">Source</h3>
-                            <div className="flex items-center gap-6">
-                                <RadioButton value="default" label="Default" />
-                                <RadioButton value="radio" label="Online Radio" />
-                                <RadioButton value="saved" label="Saved" />
-                            </div>
-                        </div>
+                        {(musicSource === 'radio' || musicSource === 'saved') && currentStation && (
+                            <label className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-white/5 -mx-2">
+                                <input
+                                    type="checkbox"
+                                    checked={isBackgroundPlayEnabled}
+                                    onChange={(e) => onIsBackgroundPlayEnabledChange(e.target.checked)}
+                                    className="w-4 h-4 text-cyan-500 bg-neutral-700 border-neutral-500 rounded focus:ring-cyan-500 focus:ring-offset-neutral-900"
+                                />
+                                <span className="text-white text-sm">Continue playing radio in background</span>
+                            </label>
+                        )}
 
                         <div className="flex items-center justify-between p-2 rounded-lg bg-black/30">
                             <div className="min-w-0 flex-grow">
@@ -124,6 +143,15 @@ const Settings: React.FC<SettingsProps> = ({
                                 >
                                     {muteState.isMusicMuted ? <MusicOffIcon className="w-6 h-6" /> : <MusicOnIcon className="w-6 h-6" />}
                                 </button>
+                            </div>
+                        </div>
+
+                        <div>
+                            <h3 className="text-lg font-semibold text-neutral-300 mb-2">Source</h3>
+                            <div className="flex items-center gap-6">
+                                <RadioButton value="default" label="Default" />
+                                <RadioButton value="radio" label="Online Radio" />
+                                <RadioButton value="saved" label="Saved" />
                             </div>
                         </div>
                         
@@ -178,6 +206,21 @@ const Settings: React.FC<SettingsProps> = ({
 
                     </div>
                 </div>
+
+                {radioPlaybackError && (
+                    <div className="absolute inset-0 bg-neutral-900/80 z-10 flex items-center justify-center p-4">
+                        <div className="bg-neutral-800 border border-red-500/50 rounded-lg p-6 max-w-sm w-full text-center shadow-2xl">
+                            <h3 className="text-lg font-bold text-red-400 mb-3">Playback Error</h3>
+                            <p className="text-neutral-300 mb-6">{radioPlaybackError}</p>
+                            <button
+                                onClick={onClearRadioPlaybackError}
+                                className="px-6 py-2 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-lg transition-colors"
+                            >
+                                OK
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

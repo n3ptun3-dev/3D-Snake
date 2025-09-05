@@ -17,7 +17,7 @@ export const COLORS = {
 
 export const FRUIT_COLORS: Record<FruitType, string> = {
     [FruitType.APPLE]: '#f472b6',         // pink-400
-    [FruitType.SPEED_BOOST]: '#facc15',   // yellow-400
+    [FruitType.SPEED_BOOST]: '#f97316',   // orange-500
     [FruitType.SLOW_DOWN]: '#22d3ee',     // cyan-400
     [FruitType.MAGNET]: '#c084fc',        // purple-400
     [FruitType.SCORE_DOUBLER]: '#f59e0b',  // amber-500
@@ -37,6 +37,7 @@ export const FRUIT_CATEGORIES: Record<FruitType, 'NORMAL' | 'BOARD' | 'PASSAGE'>
 
 export const VIEW_CYCLE: CameraView[] = [
   CameraView.FIRST_PERSON,
+  CameraView.THIRD_PERSON,
   CameraView.ORBIT,
   CameraView.DRONE_1,
   CameraView.DRONE_2,

@@ -1,7 +1,7 @@
 // A tiny, self-contained audio player using the Web Audio API for better performance and control.
 
 const APPLE_SOUND_URL = '/audio/bonus.mp3';
-const BACKGROUND_MUSIC_URL_1 = '/audio/loop_music.mp3';
+// const BACKGROUND_MUSIC_URL_1 = '/audio/loop_music.mp3';
 const BACKGROUND_MUSIC_URL_2 = '/audio/loop_music_2.wav';
 const CRASH_SOUND_URL = '/audio/crash.mp3';
 const GAME_OVER_SOUND_URL = '/audio/game_over.mp3';
@@ -30,7 +30,7 @@ const audioManager = (() => {
   // State to manage which music type is currently requested to be playing
   let activeMusicRequest: 'lobby' | 'background' | null = null;
 
-  const backgroundMusicTracks = [BACKGROUND_MUSIC_URL_1, BACKGROUND_MUSIC_URL_2];
+  const backgroundMusicTracks = [BACKGROUND_MUSIC_URL_2];
   let currentTrackIndex = 0;
 
   // New properties for mute controls and state management
@@ -257,7 +257,8 @@ const audioManager = (() => {
 
   const ALL_SOUND_URLS = [
     APPLE_SOUND_URL,
-    BACKGROUND_MUSIC_URL_1,
+    // BACKGROUND_MUSIC_URL_1,
+    BACKGROUND_MUSIC_URL_2,
     CRASH_SOUND_URL,
     GAME_OVER_SOUND_URL,
     LEVEL_UP_SOUND_URL,

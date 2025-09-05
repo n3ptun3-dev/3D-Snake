@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AdType, Sponsor, AdSubmissionData, BookedSlots, ApprovedAd, GameConfig, PromoCode, UserDTO } from '../types';
-import { submitAd, AD_PRICING, generatePaymentId, logAdClick, fetchBookedSlots, confirmPayment } from '../utils/sponsors';
+import { submitAd, generatePaymentId, logAdClick, fetchBookedSlots, confirmPayment } from '../utils/sponsors';
 import { XIcon, SpinnerIcon, MegaphoneIcon, CalendarIcon, CopyIcon, ChevronLeftIcon, ChevronRightIcon } from './icons';
 import HowItWorksOverlay from './HowItWorksOverlay';
 import { piService } from '../utils/pi';
@@ -15,6 +15,18 @@ interface AdvertisingOverlayProps {
   piUser: UserDTO | null;
   isRotated: boolean;
 }
+
+// Helper function to get the correct price from the game config
+const getAdPrice = (type: AdType, config: GameConfig): number => {
+    switch (type) {
+        case 'Billboard': return config.priceBillboard;
+        case 'Poster': return config.pricePoster;
+        case 'Banner': return config.priceBanner;
+        case 'Flyer': return config.priceFlyer;
+        case 'CosmeticBanner': return 0;
+        default: return 0;
+    }
+};
 
 // Helper function to generate flyer images as data URLs
 const generateFlyerDataUrl = (variant: number): string => {
@@ -271,7 +283,7 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
     };
 
     const handleFormSubmit = async (formData: Omit<AdSubmissionData, 'adType' | 'price' | 'scheduleDate' | 'paymentId' | 'originalPrice' | 'piUsername'>) => {
-        if (!selectedType || selectedDates.length === 0 || !piUser) return;
+        if (!selectedType || selectedDates.length === 0 || !piUser || !gameConfig) return;
 
         setLoading(true);
         setFormCache(formData);
@@ -321,7 +333,7 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
         const scheduleDateString = allDates.join(',');
         
         // --- Calculate price ---
-        const pricePerUnit = AD_PRICING[selectedType];
+        const pricePerUnit = getAdPrice(selectedType, gameConfig);
         const basePrice = pricePerUnit * formData.quantity * selectedDates.length;
         let finalPrice = basePrice;
         let originalPrice: number | undefined = undefined;
@@ -389,6 +401,9 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
 
 
     const renderContent = () => {
+        if (!gameConfig) {
+            return <div className="flex justify-center items-center h-full"><p className="text-neutral-400">Loading configuration...</p></div>
+        }
         if (loading && view !== 'list') {
              return <div className="flex justify-center items-center h-full"><SpinnerIcon className="w-10 h-10 animate-spin text-cyan-400" /></div>
         }
@@ -396,16 +411,16 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
             case 'list':
                 return <SponsorList sponsors={sponsors} loading={loading} error={error} onSponsorClick={(sponsor) => { logAdClick('Viewed', sponsor.name); setSelectedSponsor(sponsor); }} />;
             case 'select_type':
-                return <AdTypeSelection onSelect={handleSelectType} onBack={() => setView('list')} />;
+                return <AdTypeSelection onSelect={handleSelectType} onBack={() => setView('list')} gameConfig={gameConfig} />;
             case 'calendar':
                 if (!selectedType) return null;
                 return <Calendar onConfirmDates={handleDatesConfirm} onBack={() => setView('select_type')} adType={selectedType} bookedSlots={bookedSlots} />;
             case 'form':
                 if (!selectedType || selectedDates.length === 0) return null;
-                return <AdForm onSubmit={handleFormSubmit} onBack={() => setView('calendar')} adType={selectedType} selectedDates={selectedDates} initialData={formCache} promoCodes={promoCodes} onOpenTerms={onOpenTerms} bookedSlots={bookedSlots} piUser={piUser} />;
+                return <AdForm onSubmit={handleFormSubmit} onBack={() => setView('calendar')} adType={selectedType} selectedDates={selectedDates} initialData={formCache} promoCodes={promoCodes} onOpenTerms={onOpenTerms} bookedSlots={bookedSlots} piUser={piUser} gameConfig={gameConfig} />;
             case 'payment':
                 if (!submissionData) return null;
-                return <PaymentScreen data={submissionData} onConfirm={handlePaymentConfirm} onBack={handlePaymentBack} promoCodes={promoCodes} onOpenTerms={onOpenTerms} />;
+                return <PaymentScreen data={submissionData} onConfirm={handlePaymentConfirm} onBack={handlePaymentBack} promoCodes={promoCodes} onOpenTerms={onOpenTerms} gameConfig={gameConfig} />;
             case 'thank_you':
                 return <ThankYouScreen />;
             default:
@@ -510,7 +525,7 @@ const SponsorList: React.FC<{ sponsors: Sponsor[]; loading: boolean; error: stri
     );
 };
 
-const AdTypeSelection: React.FC<{ onSelect: (type: AdType) => void; onBack: () => void; }> = ({ onSelect, onBack }) => {
+const AdTypeSelection: React.FC<{ onSelect: (type: AdType) => void; onBack: () => void; gameConfig: GameConfig; }> = ({ onSelect, onBack, gameConfig }) => {
     const adTypes: { type: AdType; image: string; description: string; specs: string; }[] = [
         { type: 'Billboard', image: 'https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/billboard_preview.png', description: 'Premium placement, one per day.', specs: '16:9 Landscape / Black BG' },
         { type: 'Poster', image: 'https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/poster_preview.png', description: 'High visibility, two per day.', specs: '9:16 Portrait / Black BG' },
@@ -528,7 +543,7 @@ const AdTypeSelection: React.FC<{ onSelect: (type: AdType) => void; onBack: () =
                         <h4 className="text-lg font-bold text-white group-hover:text-cyan-300">{type}</h4>
                         <p className="text-sm text-neutral-400">{description}</p>
                         <p className="text-sm text-neutral-400 mt-1">{specs}</p>
-                        <p className="text-base font-bold text-yellow-300 mt-2">{AD_PRICING[type]} Pi / unit / day</p>
+                        <p className="text-base font-bold text-yellow-300 mt-2">{getAdPrice(type, gameConfig)} Pi / unit / day</p>
                     </button>
                 ))}
             </div>
@@ -696,7 +711,8 @@ const AdForm: React.FC<{
     onOpenTerms: () => void;
     bookedSlots: BookedSlots;
     piUser: UserDTO | null;
-}> = ({ onSubmit, onBack, adType, selectedDates, initialData, promoCodes, onOpenTerms, bookedSlots, piUser }) => {
+    gameConfig: GameConfig;
+}> = ({ onSubmit, onBack, adType, selectedDates, initialData, promoCodes, onOpenTerms, bookedSlots, piUser, gameConfig }) => {
     const [formData, setFormData] = useState<AdFormFields>(initialData || {
         imageUrl: '',
         title: '',
@@ -829,7 +845,7 @@ const AdForm: React.FC<{
         { name: 'websiteUrl', label: 'Website URL', type: 'url', required: false },
     ];
     
-    const pricePerUnit = AD_PRICING[adType];
+    const pricePerUnit = getAdPrice(adType, gameConfig);
     const basePrice = pricePerUnit * formData.quantity * numDays;
     let finalPrice = basePrice;
     
@@ -996,9 +1012,10 @@ interface PaymentScreenProps {
   onBack: () => void;
   promoCodes: Map<string, PromoCode>;
   onOpenTerms: () => void;
+  gameConfig: GameConfig;
 }
 
-const PaymentScreen: React.FC<PaymentScreenProps> = ({ data, onConfirm, onBack, promoCodes, onOpenTerms }) => {
+const PaymentScreen: React.FC<PaymentScreenProps> = ({ data, onConfirm, onBack, promoCodes, onOpenTerms, gameConfig }) => {
     const [status, setStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
     const [error, setError] = useState<string | null>(null);
     const isDummy = piService.isDummyMode();
@@ -1080,7 +1097,8 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({ data, onConfirm, onBack, 
         const promo = promoCodes.get(data.promoCode.toUpperCase());
         if (promo && promo.isActive) {
             if (promo.type === 'BOGO') {
-                const bonusDays = allDates.length - (data.originalPrice !== undefined ? (data.originalPrice / (AD_PRICING[data.adType] * data.quantity)) : allDates.length);
+                const pricePerUnit = getAdPrice(data.adType, gameConfig);
+                const bonusDays = allDates.length - (data.originalPrice !== undefined ? (data.originalPrice / (pricePerUnit * data.quantity)) : allDates.length);
                 if (bonusDays > 0) {
                     promoMessage = `Promo applied! Includes ${bonusDays} bonus day(s).`;
                 }

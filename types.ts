@@ -1,8 +1,5 @@
 
 
-
-
-
 export type GraphicsQuality = 'High' | 'Medium' | 'Low';
 
 export type Point3D = { x: number; y: number; z: number };
@@ -10,11 +7,12 @@ export type Point3D = { x: number; y: number; z: number };
 export enum CameraView {
   ORBIT = 'Orbit',
   FIRST_PERSON = 'First Person',
+  THIRD_PERSON = 'Third Person',
   DRONE_1 = 'Drone 1',
   DRONE_2 = 'Drone 2',
 }
 
-export type GameState = 'Loading' | 'Welcome' | 'Starting' | 'Playing' | 'GameOver';
+export type GameState = 'Loading' | 'Welcome' | 'Starting' | 'Playing' | 'Crashed' | 'GameOver';
 
 export enum FruitType {
   APPLE,
@@ -106,6 +104,20 @@ export type LayoutDetails = {
   buildings: BuildingDetails[];
 };
 
+// NEW: Types for the Lighting System
+export type LightEventType = 'fruitEaten' | 'levelUp' | 'gameOver' | 'crash' | 'portal' | 'turn' | 'passageFruitSpawned' | 'snakeExitedPassage' | 'portalWake';
+
+export type LightEventData = {
+    position?: Point3D;
+    fruitType?: FruitType;
+    id?: number;
+    rotation?: number;
+    portalType?: PortalType;
+    isScoreDoublerActive?: boolean;
+    isTripleActive?: boolean;
+    isMagnetActive?: boolean;
+};
+
 export type LeaderboardEntry = {
   rank: number;
   timestamp: string;
@@ -145,6 +157,10 @@ export interface GameConfig {
   streetFruitBucketExtraLifeCount: number;
   promoTitle?: string;
   promoDescription?: string;
+  priceBillboard: number;
+  pricePoster: number;
+  priceBanner: number;
+  priceFlyer: number;
 }
 
 export type RadioStation = {

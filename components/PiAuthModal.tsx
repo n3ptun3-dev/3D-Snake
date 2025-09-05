@@ -50,6 +50,10 @@ const PiAuthModal: React.FC<PiAuthModalProps> = ({ onClose, onSuccess, isRotated
                 <h2 id="pi-auth-title" className="text-xl font-bold text-white mb-2">Authentication Required</h2>
                 <p className="text-neutral-300 mb-6">Please authenticate with your Pi account to use this feature.</p>
                 
+                <div className="my-4 p-3 bg-red-900/50 border border-red-500/50 rounded-lg text-red-300 text-sm">
+                    <strong>Developer Notice:</strong> This feature is in sandbox mode for testing. Please press "Authenticate with Pi" to continue with a test user—no real Pi will be used.
+                </div>
+
                 <button 
                     onClick={handleAuth} 
                     disabled={loading}

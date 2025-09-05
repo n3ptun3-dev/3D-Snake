@@ -1,5 +1,3 @@
-
-
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Board, { BoardRef } from './components/Board';
 import Controls from './components/Controls';
@@ -20,7 +18,7 @@ import PiAuthModal from './components/PiAuthModal';
 import { CameraView, Point3D, GameState, Fruit, FruitType, ActiveEffect, LayoutDetails, GameConfig, RadioStation, RadioBrowserStation, ApprovedAd, BillboardData, LeaderboardEntry, GraphicsQuality, PromoCode, UserDTO } from './types';
 import { BOARD_WIDTH, BOARD_DEPTH, FULL_BOARD_WIDTH, FULL_BOARD_DEPTH, FRUIT_CATEGORIES, VIEW_CYCLE } from './constants';
 import audioManager from './sounds';
-import { generateLayoutDetails, isWall, isPortalBlock, getPortalEmergence, getStreetPassageSpawnPoint, isValidSpawnLocation, getBoardSpawnPoint } from './components/gameLogic';
+import { generateLayoutDetails, isWall, isPortalBlock, getPortalEmergence, getStreetPassageSpawnPoint, isValidSpawnLocation, getBoardSpawnPoint, isStreetPassageBlock, getPortalAbsolutePosition } from './components/gameLogic';
 import { isMobile, isPiBrowser as checkIsPiBrowser } from './utils/device';
 import { fetchLeaderboard } from './utils/leaderboard';
 import { getInitialConfig, fetchAndCacheGameConfig } from './utils/gameConfig';
@@ -77,6 +75,27 @@ const getInitialFruits = (currentSnake: Point3D[], currentLayoutDetails: LayoutD
   return initialFruits;
 };
 
+const determineWeather = (
+    extraLivesCollected: number,
+    rainOccurrences: number
+): 'Clear' | 'Rain' => {
+    const hasCollectedExtraLives = extraLivesCollected > 0;
+    const hasReachedRainLimit = rainOccurrences >= 1;
+
+    // If the player has never collected an extra life and it has already rained, it must be clear.
+    if (!hasCollectedExtraLives && hasReachedRainLimit) {
+        return 'Clear';
+    }
+
+    // Otherwise, there's a 20% chance of rain.
+    const willRain = Math.random() < 0.2;
+    return willRain ? 'Rain' : 'Clear';
+};
+
+const defaultSavedStations: RadioStation[] = [
+    { name: '- 0 N - Chillout on Radio', url: 'https://0n-chillout.radionetz.de/0n-chillout.aac', favicon: 'https://www.0nradio.com/logos/0n-chillout_600x600.jpg' },
+    { name: 'Magic Party Mix', url: 'https://live.magicfm.ro/magic.party.mix', favicon: 'https://media.bauerradio.com/image/upload/c_crop,g_custom/v1606492636/brand_manager/stations/agepcxvlmp6fbmslx6tt.jpg' },
+];
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>('Loading');
@@ -85,6 +104,7 @@ const App: React.FC = () => {
   
   const [snake, setSnake] = useState<{ segments: Point3D[], rotation: number; }>({ segments: [], rotation: 0 });
   const [fruits, setFruits] = useState<Fruit[]>([]);
+  const [clearingFruits, setClearingFruits] = useState<{ fruit: Fruit; startTime: number }[]>([]);
   
   const [score, setScore] = useState(0);
   const [gameSpeed, setGameSpeed] = useState(0);
@@ -96,6 +116,8 @@ const App: React.FC = () => {
   const [streetFruitBucket, setStreetFruitBucket] = useState<FruitType[]>([]);
   const [extraLivesCollectedThisLife, setExtraLivesCollectedThisLife] = useState(0);
   const [extraLivesCollectedThisGame, setExtraLivesCollectedThisGame] = useState(0);
+  const [weather, setWeather] = useState<'Clear' | 'Rain'>('Clear');
+  const [rainOccurrencesThisGame, setRainOccurrencesThisGame] = useState(0);
 
   const [isPassageFruitActive, setIsPassageFruitActive] = useState(false);
   const [boardFruitCooldown, setBoardFruitCooldown] = useState(false);
@@ -108,6 +130,7 @@ const App: React.FC = () => {
   const [activeEffects, setActiveEffects] = useState<ActiveEffect[]>([]);
   const [isLeaderboardOpen, setIsLeaderboardOpen] = useState(false);
   const [isSubmitScoreOpen, setIsSubmitScoreOpen] = useState(false);
+  const [submissionQualifiesForLeaderboard, setSubmissionQualifiesForLeaderboard] = useState(false);
   const [isHowToPlayOpen, setIsHowToPlayOpen] = useState(false);
   const [isJoinPiOpen, setIsJoinPiOpen] = useState(false);
   const [isAboutSpiOpen, setIsAboutSpiOpen] = useState(false);
@@ -117,7 +140,19 @@ const App: React.FC = () => {
   const [lastGameData, setLastGameData] = useState<{ score: number; level: number; topSpeed: number; } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [cameraView, setCameraView] = useState<CameraView>(CameraView.ORBIT);
+  const [lastGameplayView, setLastGameplayView] = useState<CameraView>(() => {
+      try {
+          const savedView = localStorage.getItem('snakeGameplayView') as CameraView;
+          if (savedView === CameraView.FIRST_PERSON || savedView === CameraView.THIRD_PERSON) {
+              return savedView;
+          }
+      } catch (e) {
+          console.warn("Could not read 'snakeGameplayView' from localStorage.", e);
+      }
+      return CameraView.FIRST_PERSON;
+  });
   const [gameId, setGameId] = useState(0);
+  const [visualRotation, setVisualRotation] = useState(0);
   
   // Settings and Radio State
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -139,13 +174,15 @@ const App: React.FC = () => {
   const [radioStations, setRadioStations] = useState<RadioBrowserStation[]>([]);
   const [isRadioLoading, setIsRadioLoading] = useState(false);
   const [radioError, setRadioError] = useState<string | null>(null);
+  const [radioPlaybackError, setRadioPlaybackError] = useState<string | null>(null);
   const [flashMessage, setFlashMessage] = useState<string | null>(null);
   const [isPageVisible, setIsPageVisible] = useState(document.visibilityState === 'visible');
   const [savedStations, setSavedStations] = useState<RadioStation[]>(() => {
     try {
       const saved = localStorage.getItem('snake-saved-stations');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
+      const parsed = saved ? JSON.parse(saved) : null;
+      return (parsed && parsed.length > 0) ? parsed : defaultSavedStations;
+    } catch { return defaultSavedStations; }
   });
   const [isBackgroundPlayEnabled, setIsBackgroundPlayEnabled] = useState<boolean>(() => {
       return localStorage.getItem('snake-background-play') === 'true';
@@ -166,6 +203,11 @@ const App: React.FC = () => {
   const [isPiAuthModalOpen, setIsPiAuthModalOpen] = useState(false);
   const [onAuthSuccessCallback, setOnAuthSuccessCallback] = useState<(() => void) | null>(null);
   const [initialOverlayToShow, setInitialOverlayToShow] = useState<string | null>(null);
+  
+  // Crash/Respawn/Game Over state
+  const [crashOutcome, setCrashOutcome] = useState<'respawn' | 'gameOver' | null>(null);
+  const [nextSnake, setNextSnake] = useState<Point3D[] | null>(null);
+  const [isGameOverHudVisible, setIsGameOverHudVisible] = useState(false);
 
   const animationFrameRef = useRef<number | null>(null);
   const passageFruitRetryTimer = useRef<number | null>(null);
@@ -191,9 +233,12 @@ const App: React.FC = () => {
   const streetFruitBucketRef = useRef(streetFruitBucket); streetFruitBucketRef.current = streetFruitBucket;
   const extraLivesCollectedThisLifeRef = useRef(extraLivesCollectedThisLife); extraLivesCollectedThisLifeRef.current = extraLivesCollectedThisLife;
   const extraLivesCollectedThisGameRef = useRef(extraLivesCollectedThisGame); extraLivesCollectedThisGameRef.current = extraLivesCollectedThisGame;
+  const rainOccurrencesThisGameRef = useRef(rainOccurrencesThisGame); rainOccurrencesThisGameRef.current = rainOccurrencesThisGame;
   const gameStateRef = useRef(gameState); gameStateRef.current = gameState;
   const isPausedRef = useRef(isPaused); isPausedRef.current = isPaused;
   const isCrashingRef = useRef(isCrashing); isCrashingRef.current = isCrashing;
+  const crashOutcomeRef = useRef(crashOutcome); crashOutcomeRef.current = crashOutcome;
+  const nextSnakeRef = useRef(nextSnake); nextSnakeRef.current = nextSnake;
   
   useEffect(() => {
     const unsubscribe = piService.subscribe(setPiUser);
@@ -216,7 +261,7 @@ const App: React.FC = () => {
   };
   
   const handleRadioError = useCallback(() => {
-    setFlashMessage("No playable source found for station.");
+    setRadioPlaybackError("No playable source was found for this station.");
   }, []);
 
   const handleOpenAmi = () => {
@@ -230,7 +275,7 @@ const App: React.FC = () => {
   };
 
   const handleLeaderboardUpdate = useCallback((allScores: LeaderboardEntry[]) => {
-    console.log("Leaderboard opened, refreshing billboard data...");
+    // console.log("Leaderboard opened, refreshing billboard data...");
     const topScores = [...allScores].sort((a, b) => b.score - a.score).slice(0, 3);
     const topSpeeds = [...allScores].sort((a, b) => b.speed - a.speed).slice(0, 3);
     setBillboardData(currentData => {
@@ -267,11 +312,14 @@ const App: React.FC = () => {
       } else { // e.g. 'Starting' or 'Loading' state
         audioManager.stopAllDefaultMusic();
       }
-    } else {
-      // Music source is radio, so stop all default music.
-      audioManager.stopAllDefaultMusic();
+    } else { // musicSource is 'radio' or 'saved'
+      // Only stop default music if a radio station is selected and is supposed to be playing.
+      if (currentStation) {
+        audioManager.stopAllDefaultMusic();
+      }
+      // If no station is selected yet, the default music continues to play.
     }
-  }, [gameState, isPaused, musicSource, isCrashing]);
+  }, [gameState, isPaused, musicSource, isCrashing, currentStation]);
   
   // Flash message handler
   useEffect(() => {
@@ -308,7 +356,7 @@ const App: React.FC = () => {
         // When gameplay is active, lock to landscape
         if (typeof (screen.orientation as any).lock === 'function') {
           (screen.orientation as any).lock('landscape').catch((err: any) => {
-              console.warn("Could not re-lock screen to landscape:", err);
+              // console.warn("Could not re-lock screen to landscape:", err);
           });
         }
       } else {
@@ -419,29 +467,48 @@ const App: React.FC = () => {
       }
   }, [gameState]);
   
-  // Effect to handle opening overlays from a direct URL
+  // Effect to handle opening initial overlays (from URL or first-time visit)
   useEffect(() => {
-      if (gameState === 'Welcome' && isWelcomePanelVisible && initialOverlayToShow) {
-          switch (initialOverlayToShow) {
-              case 'terms':
-                  setIsTermsOpen(true);
-                  break;
-              case 'credits':
-                  setIsCreditsOpen(true);
-                  break;
-              case 'about':
-                  setIsAboutSpiOpen(true);
-                  break;
-              case 'privacy':
-                  setIsPrivacyPolicyOpen(true);
-                  break;
+      if (gameState === 'Welcome' && isWelcomePanelVisible) {
+          if (initialOverlayToShow) {
+              // If a specific overlay is requested via URL, show it.
+              switch (initialOverlayToShow) {
+                  case 'terms':
+                      setIsTermsOpen(true);
+                      break;
+                  case 'credits':
+                      setIsCreditsOpen(true);
+                      break;
+                  case 'about':
+                      setIsAboutSpiOpen(true);
+                      break;
+                  case 'privacy':
+                      setIsPrivacyPolicyOpen(true);
+                      break;
+              }
+              // Clear the trigger and set the session flag so "How to Play" doesn't open later.
+              setInitialOverlayToShow(null);
+              sessionStorage.setItem('hasSeenWelcome', 'true');
+          } else {
+              // Otherwise, check if it's the first visit in this session.
+              const hasSeenWelcome = sessionStorage.getItem('hasSeenWelcome');
+              if (!hasSeenWelcome) {
+                  // If it's the first visit, show the "How to Play" overlay after a delay.
+                  const timer = setTimeout(() => {
+                      setIsHowToPlayOpen(true);
+                  }, 2000); // 2 seconds after the welcome panel is visible
+                  
+                  // Set the flag so it doesn't show on subsequent returns to the welcome screen.
+                  sessionStorage.setItem('hasSeenWelcome', 'true');
+                  
+                  // Cleanup the timer if the component unmounts or dependencies change.
+                  return () => clearTimeout(timer);
+              }
           }
-          // Clear the trigger so it doesn't re-open on game over etc.
-          setInitialOverlayToShow(null);
       }
   }, [gameState, isWelcomePanelVisible, initialOverlayToShow]);
 
-  const isExpanded = (gameState === 'Welcome' && isWelcomePanelVisible) || gameState === 'GameOver' || isPaused;
+  const isExpanded = (gameState === 'Welcome' && isWelcomePanelVisible) || (gameState === 'GameOver' && isGameOverHudVisible) || isPaused;
   useEffect(() => {
     if (!isExpanded) {
         setIsHudContentVisible(true);
@@ -476,78 +543,154 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [gameState, isPaused]);
   
+  // This effect ensures the camera view is correctly set whenever the game becomes playable.
   useEffect(() => {
-    if (gameState === 'GameOver' && lastGameData) {
-        // If the score is too low, don't bother checking the leaderboard.
-        if (lastGameData.score < 10) {
-            return;
-        }
-        // After a delay, check if the score is high enough for the leaderboard.
-        const checkLeaderboard = async () => {
-            try {
-                const leaderboard = await fetchLeaderboard(isMobile() ? 'mobile' : 'computer');
-                const lowestScore = leaderboard.length > 0 ? leaderboard[leaderboard.length - 1].score : 0;
-                // If the leaderboard has space or the score is higher than the lowest, show the submit form.
-                if (leaderboard.length < 100 || lastGameData.score > lowestScore) {
-                    setIsSubmitScoreOpen(true);
-                }
-            } catch (error) {
-                // Fail silently if leaderboard check fails. The user can still play again.
-                console.error("Failed to fetch leaderboard for score check:", error);
-            }
-        };
-        setTimeout(checkLeaderboard, 2000);
+    if (gameState === 'Playing') {
+      setCameraView(lastGameplayView);
     }
-  }, [gameState, lastGameData]);
+  }, [gameState, lastGameplayView]);
+  
+  useEffect(() => {
+    // This effect runs when the game is over and the final HUD is visible.
+    // It checks if a new local high score was set and decides which popup to show.
+    if (gameState === 'GameOver' && lastGameData && isGameOverHudVisible) {
+      // A new local high score was set if the score from the completed game
+      // is equal to the currently stored high score (which would have just been updated).
+      // Also, don't show popups for a score of 0.
+      if (lastGameData.score === highScore && highScore > 0) {
+        
+        const checkAndShowPopup = async () => {
+          try {
+            const leaderboard = await fetchLeaderboard(isMobile() ? 'mobile' : 'computer');
+            const lowestScore = leaderboard.length > 0 ? leaderboard[leaderboard.length - 1].score : 0;
+            
+            // A score qualifies for the leaderboard if the board isn't full OR the score is higher than the lowest,
+            // AND the score is greater than 10.
+            const qualifies = (leaderboard.length < 100 || lastGameData.score > lowestScore) && lastGameData.score > 10;
+            
+            setSubmissionQualifiesForLeaderboard(qualifies);
 
-  const handleGameOver = useCallback(() => {
+          } catch (error) {
+            console.error("Failed to fetch leaderboard for score check:", error);
+            // If the leaderboard check fails, we can't submit, so it doesn't qualify.
+            setSubmissionQualifiesForLeaderboard(false);
+          } finally {
+            // In any case of a new high score (qualifying or not), open the modal.
+            setIsSubmitScoreOpen(true);
+          }
+        };
+
+        // Use a timeout to let the Game Over screen settle before showing the popup.
+        setTimeout(checkAndShowPopup, 2000);
+      }
+    }
+  }, [gameState, lastGameData, isGameOverHudVisible, highScore]);
+
+  // Effect to clean up fruits that are animating their highlight clearing
+  useEffect(() => {
+    if (clearingFruits.length === 0) return;
+    const CLEAR_DURATION = 1000; // ms
+    const interval = setInterval(() => {
+        const now = Date.now();
+        setClearingFruits(prev => prev.filter(cf => now < cf.startTime + CLEAR_DURATION));
+    }, 200);
+    return () => clearInterval(interval);
+  }, [clearingFruits]);
+
+  const finalizeGameOver = useCallback(() => {
+    boardRef.current?.triggerLightEvent('gameOver', {});
     audioManager.playGameOverSound();
     if (scoreRef.current > highScoreRef.current) {
       setHighScore(scoreRef.current);
       localStorage.setItem('snakeHighScore', scoreRef.current.toString());
     }
     setLastGameData({ score: scoreRef.current, level: levelRef.current, topSpeed: topSpeedRef.current });
+    setIsGameOverHudVisible(false);
     setGameState('GameOver');
     setCameraView(CameraView.ORBIT);
     if(isPiBrowser) setIsRotated(false);
   }, [isPiBrowser]);
   
+  const handleGameOverAnimationComplete = useCallback(() => {
+    // Delay to let the orbit start smoothly
+    setTimeout(() => {
+        setIsGameOverHudVisible(true);
+    }, 500);
+  }, []);
+
   const handleCrash = useCallback((crashedHead: Point3D, finalRotation: number) => {
+    boardRef.current?.triggerLightEvent('crash', { position: crashedHead });
     audioManager.playCrashSound();
     setIsCrashing(true);
     
-    // Update the snake's state to include the crashed head, making it visible during the crash sequence.
-    setSnake({
-        segments: [crashedHead, ...snakeRef.current.segments],
-        rotation: finalRotation
-    });
+    // The snake should be rendered at its last valid position.
+    // We update its rotation to reflect the final turn attempt, but keep the segments the same.
+    // The `crashedHead` position is used for effects, not for rendering the snake's body.
+    setSnake(prevSnake => ({
+      ...prevSnake,
+      rotation: finalRotation
+    }));
   
-    setLives(currentLives => {
-      const newLives = currentLives - 1;
-      if (newLives > 0) {
-        setTimeout(() => {
-          setActiveEffects([]);
-          setBaseGameSpeed(gameConfigRef.current!.initialGameSpeed);
-          setIsCrashing(false);
-          // Reset snake to its initial length on respawn.
-          const startingSnake = createSnakeAtStart(gameConfigRef.current!.initialSnakeLength);
-          setSnake({ segments: startingSnake, rotation: 0 });
-          commandQueue.current = [];
-          setExtraLivesCollectedThisLife(0);
-          
-          const newFruits = getInitialFruits(startingSnake, layoutDetailsRef.current!, gameConfigRef.current!, extraLivesCollectedThisGameRef.current);
-          setFruits(newFruits);
-          setIsPassageFruitActive(newFruits.some(f => FRUIT_CATEGORIES[f.type] === 'PASSAGE'));
+    const newLives = livesRef.current - 1;
+    setLives(newLives);
 
-          audioManager.playGameStartSound();
-          setGameState('Playing');
-        }, 2000);
-      } else {
-        setTimeout(handleGameOver, 1500);
-      }
-      return newLives;
-    });
-  }, [handleGameOver]);
+    if (newLives > 0) {
+        setCrashOutcome('respawn');
+        const startingSnake = createSnakeAtStart(gameConfigRef.current!.initialSnakeLength);
+        setNextSnake(startingSnake);
+    } else {
+        setCrashOutcome('gameOver');
+        setNextSnake(null);
+    }
+
+    setGameState('Crashed');
+
+  }, []);
+
+  const handleCrashAnimationComplete = useCallback(() => {
+    setIsCrashing(false);
+
+    if (crashOutcomeRef.current === 'respawn') {
+        setActiveEffects([]);
+        setBaseGameSpeed(gameConfigRef.current!.initialGameSpeed);
+        
+        const startingSnake = nextSnakeRef.current!;
+        setSnake({ segments: startingSnake, rotation: 0 });
+        commandQueue.current = [];
+        setExtraLivesCollectedThisLife(0);
+        setVisualRotation(0);
+        
+        const newWeather = determineWeather(extraLivesCollectedThisGameRef.current, rainOccurrencesThisGameRef.current);
+        setWeather(newWeather);
+        if (newWeather === 'Rain') {
+            setRainOccurrencesThisGame(occurrences => occurrences + 1);
+        }
+
+        const newFruits = getInitialFruits(startingSnake, layoutDetailsRef.current!, gameConfigRef.current!, extraLivesCollectedThisGameRef.current);
+        setFruits(newFruits);
+        setIsPassageFruitActive(newFruits.some(f => FRUIT_CATEGORIES[f.type] === 'PASSAGE'));
+
+        audioManager.playGameStartSound();
+        
+        // The crash animation leaves the camera high up. The 'Starting' state in Board.tsx
+        // will animate from that position down to the new snake.
+        setGameState('Starting');
+        // We DO NOT set camera view here, as that would cause a pre-animation jump.
+
+        // After the animation is complete, switch to 'Playing' state. The camera view will be set by the useEffect.
+        setTimeout(() => {
+          if (gameStateRef.current === 'Starting') {
+              setGameState('Playing');
+          }
+        }, 4000);
+
+    } else if (crashOutcomeRef.current === 'gameOver') {
+        finalizeGameOver();
+    }
+
+    setCrashOutcome(null);
+    setNextSnake(null);
+  }, [finalizeGameOver]);
 
   const handleStartGame = useCallback(() => {
     audioManager.playGameStartSound();
@@ -563,6 +706,7 @@ const App: React.FC = () => {
     
     const initialFruitsForGame = getInitialFruits(startingSnake, layoutForGame, gameConfigRef.current!, 0);
     setFruits(initialFruitsForGame);
+    setClearingFruits([]);
     setIsPassageFruitActive(initialFruitsForGame.some(f => FRUIT_CATEGORIES[f.type] === 'PASSAGE'));
     
     commandQueue.current = [];
@@ -575,17 +719,20 @@ const App: React.FC = () => {
     setTopSpeed(1000 / gameConfigRef.current!.initialGameSpeed);
     setActiveEffects([]);
     setLastGameData(null);
+    setIsGameOverHudVisible(false);
     setStreetFruitBucket([]);
     setExtraLivesCollectedThisLife(0);
     setExtraLivesCollectedThisGame(0);
+    setVisualRotation(0);
+    
+    // Determine initial weather based on new logic
+    const initialWeather = determineWeather(0, 0);
+    setWeather(initialWeather);
+    setRainOccurrencesThisGame(initialWeather === 'Rain' ? 1 : 0);
     
     setGameId(id => id + 1); // This can be used by child components to detect a new game.
     setGameState('Starting');
-
-    // After a delay (when animation starts), set camera to FPV so it's correct when animation ends.
-    setTimeout(() => {
-        setCameraView(CameraView.FIRST_PERSON);
-    }, 1000);
+    // Do not set camera view here to allow smooth animation from orbit view.
 
     // The Board component handles the animation. After it's done, we switch to playing.
     setTimeout(() => {
@@ -603,6 +750,7 @@ const App: React.FC = () => {
     
     const initialFruitsForGame = getInitialFruits(startingSnake, newLayout, config, 0);
     setFruits(initialFruitsForGame);
+    setClearingFruits([]);
     setIsPassageFruitActive(initialFruitsForGame.some(f => FRUIT_CATEGORIES[f.type] === 'PASSAGE'));
 
     commandQueue.current = [];
@@ -616,7 +764,10 @@ const App: React.FC = () => {
     setActiveEffects([]);
     setLastGameData(null);
     setIsPaused(false);
+    setIsGameOverHudVisible(false);
+    setVisualRotation(0);
     setIsCrashing(false);
+    setWeather('Clear');
     setCameraView(CameraView.ORBIT);
     setGameState('Welcome');
     if (isPiBrowser) setIsRotated(false);
@@ -625,7 +776,10 @@ const App: React.FC = () => {
   const handleTurn = useCallback((direction: 'left' | 'right') => {
     if (gameState !== 'Playing' || isPaused || isCrashing) return;
     if (direction === 'left') audioManager.playTurnLeftSound(); else audioManager.playTurnRightSound();
-    if (commandQueue.current.length < 2) commandQueue.current.push(direction);
+    if (commandQueue.current.length < 2) {
+      commandQueue.current.push(direction);
+      setVisualRotation(rot => rot + (direction === 'left' ? Math.PI / 2 : -Math.PI / 2));
+    }
     setActiveKey(direction);
     setTimeout(() => setActiveKey(null), 150);
   }, [gameState, isPaused, isCrashing]);
@@ -634,13 +788,13 @@ const App: React.FC = () => {
     if (gameStateRef.current !== 'Playing' || isCrashingRef.current) return;
 
     setIsPaused(wasPaused => {
-      // If unpausing, force the camera back to First Person view for gameplay.
+      // If unpausing, restore the last gameplay view.
       if (wasPaused) {
-        setCameraView(CameraView.FIRST_PERSON);
+        setCameraView(lastGameplayView);
       }
       return !wasPaused;
     });
-  }, []);
+  }, [lastGameplayView]);
 
   // Page Visibility API handler to pause/resume game
   useEffect(() => {
@@ -681,7 +835,7 @@ const App: React.FC = () => {
                 });
             }
         }).catch((err) => {
-            console.error("Error requesting fullscreen:", err);
+            // console.error("Error requesting fullscreen:", err);
         });
     } else {
         if (screen.orientation && typeof screen.orientation.unlock === 'function') {
@@ -706,6 +860,20 @@ const App: React.FC = () => {
           return VIEW_CYCLE[nextIndex];
       });
   }, [gameState, isPaused, isCrashing]);
+
+  const handleToggleGameplayView = useCallback(() => {
+      if (gameStateRef.current !== 'Playing' || isCrashingRef.current) return;
+      setCameraView(prev => {
+          const newView = prev === CameraView.FIRST_PERSON ? CameraView.THIRD_PERSON : CameraView.FIRST_PERSON;
+          setLastGameplayView(newView);
+          try {
+              localStorage.setItem('snakeGameplayView', newView);
+          } catch (e) {
+              console.warn("Could not save 'snakeGameplayView' to localStorage.", e);
+          }
+          return newView;
+      });
+  }, []);
 
     const searchRadioStations = useCallback(async (term: string) => {
         if (!term.trim()) return;
@@ -736,6 +904,7 @@ const App: React.FC = () => {
     }, []);
 
     const handleStationSelect = useCallback((station: RadioStation) => {
+        // console.log('Selected Radio Station Details:', JSON.stringify(station, null, 2));
         setCurrentStation(station);
         localStorage.setItem('snake-radio-station', JSON.stringify(station));
 
@@ -752,13 +921,8 @@ const App: React.FC = () => {
                 setRadioSearchTerm(termToSearch);
             }
             searchRadioStations(termToSearch);
-        } else if (source === 'saved') {
-            const isCurrentStationSaved = savedStations.some(s => s.url === currentStation?.url);
-            if (savedStations.length > 0 && !isCurrentStationSaved) {
-                handleStationSelect(savedStations[0]);
-            }
         }
-    }, [currentStation, radioStations.length, searchRadioStations, radioSearchTerm, savedStations, handleStationSelect]);
+    }, [currentStation, radioStations.length, searchRadioStations, radioSearchTerm]);
     
     const handleToggleSaveStation = useCallback((station: RadioStation | null) => {
         if (!station) return;
@@ -856,6 +1020,7 @@ const App: React.FC = () => {
             setStreetFruitBucket(bucket); // Update state for next spawn
 
             setFruits(prev => [...prev, { id: Date.now(), type: newType, position: newPos }]);
+            boardRef.current?.triggerLightEvent('passageFruitSpawned', { fruitType: newType });
             setIsPassageFruitActive(true);
             if (passageFruitRetryTimer.current) clearTimeout(passageFruitRetryTimer.current);
             passageFruitRetryTimer.current = null;
@@ -872,19 +1037,56 @@ const App: React.FC = () => {
     };
   }, [gameState, isPaused, gameConfig]);
 
+  // This effect ensures the lighting for the initial passage fruit is triggered,
+  // both at the start of a new game and after respawning.
+  useEffect(() => {
+    // We want this to run when we enter a playable state.
+    // This happens at the start of a new game, or after respawning (when isCrashing becomes false).
+    if (gameState === 'Playing' && !isPaused && !isCrashing) {
+      const passageFruit = fruitsRef.current.find(f => FRUIT_CATEGORIES[f.type] === 'PASSAGE');
+      if (passageFruit) {
+        // Ensure its light effect is triggered, as getInitialFruits doesn't have access to the boardRef.
+        boardRef.current?.triggerLightEvent('passageFruitSpawned', { fruitType: passageFruit.type });
+      }
+    }
+  }, [gameState, isPaused, isCrashing, gameId]); // isCrashing is the key to fixing the respawn bug.
+
   const gameTick = useCallback(() => {
     const { segments: prevSegments, rotation: prevRotation } = snakeRef.current;
     if (prevSegments.length === 0) return;
     const command = commandQueue.current.shift();
     let nextRotation = prevRotation + (command ? (command === 'left' ? Math.PI / 2 : -Math.PI / 2) : 0);
+    
+    if (command) {
+        boardRef.current?.triggerLightEvent('turn', {
+            position: prevSegments[0],
+            rotation: nextRotation,
+        });
+    }
+
     const head = prevSegments[0];
     let newHead = { x: head.x - Math.round(Math.sin(nextRotation)), y: head.y, z: head.z - Math.round(Math.cos(nextRotation)) };
     const enteredPortal = isPortalBlock(newHead, layoutDetailsRef.current!.portals);
     if (enteredPortal) {
+        boardRef.current?.triggerLightEvent('portalWake', { position: { ...newHead }, portalType: enteredPortal.type });
+        boardRef.current?.triggerLightEvent('portal', { position: newHead });
         audioManager.playPortalSound();
         const { pos, rot } = getPortalEmergence(enteredPortal, layoutDetailsRef.current!.portals);
-        newHead = pos; nextRotation = rot;
+        newHead = pos; 
+        nextRotation = rot;
+        setVisualRotation(rot); // FIX: Sync the camera's visual rotation with the snake's new physical rotation.
+        
+        const exitPortal = layoutDetailsRef.current!.portals.find(p => p.type === enteredPortal.type && p.id !== enteredPortal.id)!;
+        const exitPortalPos = getPortalAbsolutePosition(exitPortal);
+        boardRef.current?.triggerLightEvent('portalWake', { position: exitPortalPos, portalType: exitPortal.type });
     }
+
+    const wasInPassage = isStreetPassageBlock(head.x, head.z, layoutDetailsRef.current!.street);
+    const isInPassage = isStreetPassageBlock(newHead.x, newHead.z, layoutDetailsRef.current!.street);
+    if (wasInPassage && !isInPassage) {
+        boardRef.current?.triggerLightEvent('snakeExitedPassage', {});
+    }
+
     if (isWall(newHead, layoutDetailsRef.current!) || prevSegments.slice(1).some(s => s.x === newHead.x && s.z === newHead.z)) {
         handleCrash(newHead, nextRotation); 
         return;
@@ -897,10 +1099,19 @@ const App: React.FC = () => {
         let points = 0, growth = 0, livesGained = 0;
         const newEffects: ActiveEffect[] = [];
         const eatenIds = new Set(eatenFruits.map(f => f.id));
-
         const isDoublerActive = activeEffectsRef.current.some(e => e.type === FruitType.SCORE_DOUBLER);
         const isTripleActive = activeEffectsRef.current.some(e => e.type === FruitType.TRIPLE);
-        
+
+        eatenFruits.forEach(fruit => {
+            boardRef.current?.triggerLightEvent('fruitEaten', {
+                position: fruit.position,
+                fruitType: fruit.type,
+                isScoreDoublerActive: isDoublerActive,
+                isTripleActive: isTripleActive,
+                isMagnetActive: isMagnetActive,
+            });
+        });
+
         const eatenAppleCount = eatenFruits.filter(f => f.type === FruitType.APPLE).length;
         if (eatenAppleCount > 0) {
             let pointsPerApple;
@@ -971,7 +1182,8 @@ const App: React.FC = () => {
                 const newS = s + points; 
                 if (Math.floor(newS / gameConfigRef.current!.pointsPerLevel) > Math.floor(s / gameConfigRef.current!.pointsPerLevel)) { 
                     setLevel(l => l + 1); 
-                    audioManager.playLevelUpSound(); 
+                    audioManager.playLevelUpSound();
+                    boardRef.current?.triggerLightEvent('levelUp', {});
                 } 
                 return newS; 
             });
@@ -983,6 +1195,11 @@ const App: React.FC = () => {
             setExtraLivesCollectedThisGame(c => c + livesGained);
         }
         if (newEffects.length > 0) setActiveEffects(p => [...p.filter(e => !newEffects.some(ne => ne.type === e.type)), ...newEffects]);
+        
+        const fruitsToClear = fruitsRef.current.filter(f => eatenIds.has(f.id));
+        if (fruitsToClear.length > 0) {
+            setClearingFruits(prev => [...prev, ...fruitsToClear.map(fruit => ({ fruit, startTime: Date.now() }))]);
+        }
         
         let nextFruits = fruitsRef.current.filter(f => !eatenIds.has(f.id));
         if (eatenAppleCount > 0) {
@@ -996,7 +1213,11 @@ const App: React.FC = () => {
         }
         setFruits(nextFruits);
 
-        if (eatenFruits.some(f => FRUIT_CATEGORIES[f.type] === 'PASSAGE')) setIsPassageFruitActive(false);
+        // Turn off searchlights if a passage fruit was eaten.
+        const eatenPassageFruit = eatenFruits.some(f => FRUIT_CATEGORIES[f.type] === 'PASSAGE');
+        if (eatenPassageFruit) {
+            setIsPassageFruitActive(false);
+        }
     }
 
     setSnake({ segments: [newHead, ...prevSegments.slice(0, prevSegments.length - (shouldGrow.current > 0 ? 0 : 1))], rotation: nextRotation });
@@ -1103,6 +1324,7 @@ const App: React.FC = () => {
         flashMessage={flashMessage}
         cameraView={cameraView}
         onCycleCamera={handleCycleCamera}
+        onToggleGameplayView={handleToggleGameplayView}
         isHudContentVisible={isHudContentVisible}
         setIsHudContentVisible={setIsHudContentVisible}
         onResetToWelcome={handleResetToWelcome}
@@ -1116,6 +1338,8 @@ const App: React.FC = () => {
         isPiBrowser={isPiBrowser}
         isRotated={isRotated}
         onToggleRotate={handleToggleRotate}
+        isSettingsOpen={isSettingsOpen}
+        isGameOverHudVisible={isGameOverHudVisible}
       />
       <div className="absolute inset-0 flex items-center justify-center">
         {layoutDetails && (
@@ -1128,6 +1352,18 @@ const App: React.FC = () => {
             billboardData={billboardData}
             graphicsQuality={graphicsQuality}
             isPageVisible={isPageVisible}
+            visualRotation={visualRotation}
+            isPaused={isPaused}
+            weather={weather}
+            score={score}
+            level={level}
+            activeEffects={activeEffects}
+            crashOutcome={crashOutcome}
+            onCrashAnimationComplete={handleCrashAnimationComplete}
+            onGameOverAnimationComplete={handleGameOverAnimationComplete}
+            nextSnake={nextSnake}
+            lastGameplayView={lastGameplayView}
+            clearingFruits={clearingFruits}
           />
         )}
       </div>
@@ -1141,7 +1377,7 @@ const App: React.FC = () => {
       />
       {isAmiOpen && <AdvertisingOverlay onClose={() => setIsAmiOpen(false)} approvedAds={approvedAds} gameConfig={gameConfig} promoCodes={promoCodes} onOpenTerms={() => setIsTermsOpen(true)} requestPiAuth={requestPiAuth} piUser={piUser} isRotated={isRotated} />}
       {isLeaderboardOpen && <Leaderboard onClose={() => setIsLeaderboardOpen(false)} onLeaderboardUpdate={handleLeaderboardUpdate} isRotated={isRotated} />}
-      {isSubmitScoreOpen && lastGameData && <SubmitScore scoreData={lastGameData} onClose={() => setIsSubmitScoreOpen(false)} requestPiAuth={requestPiAuth} isRotated={isRotated} />}
+      {isSubmitScoreOpen && lastGameData && <SubmitScore scoreData={lastGameData} onClose={() => setIsSubmitScoreOpen(false)} requestPiAuth={requestPiAuth} isRotated={isRotated} isForLeaderboard={submissionQualifiesForLeaderboard} />}
       {isHowToPlayOpen && <HowToPlayOverlay onClose={() => setIsHowToPlayOpen(false)} isRotated={isRotated} />}
       {isFeedbackOpen && <FeedbackOverlay onClose={() => setIsFeedbackOpen(false)} isRotated={isRotated} />}
       {isJoinPiOpen && <JoinPiOverlay onClose={() => setIsJoinPiOpen(false)} isRotated={isRotated} />}
@@ -1176,6 +1412,9 @@ const App: React.FC = () => {
               onIsBackgroundPlayEnabledChange={setIsBackgroundPlayEnabled}
               savedStations={savedStations}
               onToggleSaveStation={handleToggleSaveStation}
+              showBackdrop={!((isExpanded && !isHudContentVisible))}
+              radioPlaybackError={radioPlaybackError}
+              onClearRadioPlaybackError={() => setRadioPlaybackError(null)}
           />
       )}
     </main>

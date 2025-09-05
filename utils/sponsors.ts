@@ -2,14 +2,6 @@ import { AdType, AdSubmissionData, ApprovedAd, BookedSlots, PromoCode } from '..
 
 // --- ADVERTISING LOGIC ---
 
-export const AD_PRICING: Record<AdType, number> = {
-    Billboard: 5,
-    Poster: 3,
-    Banner: 2,
-    Flyer: 1,
-    CosmeticBanner: 0,
-};
-
 const AD_TYPE_TO_FORM_VALUE: Record<AdType, string> = {
     Billboard: '1',
     Poster: '2',

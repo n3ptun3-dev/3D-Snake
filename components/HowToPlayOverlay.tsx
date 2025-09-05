@@ -3,7 +3,7 @@ import { FRUIT_COLORS } from '../constants';
 import { FruitType } from '../types';
 import {
     XIcon, ArrowLeftIcon, ArrowRightIcon, SpeedBoostIcon, SlowDownIcon, MagnetIcon,
-    ScoreDoublerIcon, HeartIcon, TripleIcon
+    ScoreDoublerIcon, HeartIcon, TripleIcon, EyeIcon, RadioIcon, MusicOnIcon, SfxOnIcon
 } from './icons';
 
 interface HowToPlayOverlayProps {
@@ -20,43 +20,43 @@ const nodeData = [
     },
     {
         type: FruitType.SPEED_BOOST,
-        name: 'Overdrive Node',
+        name: 'Overdrive Node (speed up)',
         description: 'Temporarily doubles your current speed. Use with caution at high velocities!',
         icon: <SpeedBoostIcon className="w-6 h-6 text-yellow-400" />
     },
     {
         type: FruitType.SLOW_DOWN,
-        name: 'Stasis Node',
+        name: 'Stasis Node (slow down)',
         description: 'Instantly reduces your base speed, making high-speed navigation more manageable.',
         icon: <SlowDownIcon className="w-6 h-6 text-cyan-400" />
     },
     {
         type: FruitType.MAGNET,
-        name: 'Tractor Node',
+        name: 'Tractor Node (magnet)',
         description: 'Pulls nearby Data Nodes towards you for a short period.',
         icon: <MagnetIcon className="w-6 h-6 text-purple-400" />
     },
     {
         type: FruitType.SCORE_DOUBLER,
-        name: 'Multiplier Node',
+        name: 'Multiplier Node (x2)',
         description: 'Doubles the points gained from each Data Node for a limited time.',
         icon: <ScoreDoublerIcon className="w-6 h-6 text-amber-500" />
     },
     {
         type: FruitType.TRIPLE,
-        name: 'Fork Node',
+        name: 'Fork Node (x3)',
         description: 'For a short duration, each Data Node collected spawns three more and triples your growth.',
         icon: <TripleIcon className="w-6 h-6 text-green-400" />
     },
     {
         type: FruitType.EXTRA_LIFE,
-        name: 'Aegis Node',
+        name: 'Aegis Node (1up)',
         description: 'A rare node found in the outer passages that grants an extra life.',
         icon: <HeartIcon className="w-6 h-6 text-red-500" />
     },
 ];
 
-const Maneuver: React.FC<{ title: string; description: string; children: React.ReactNode; }> = ({ title, description, children }) => (
+const InfoItem: React.FC<{ title: string; description: string; children: React.ReactNode; }> = ({ title, description, children }) => (
     <div className="bg-neutral-800/60 p-4 rounded-lg flex items-center gap-4">
         <div className="flex-shrink-0 flex items-center justify-center gap-1 bg-black/40 p-3 rounded-md">
             {children}
@@ -94,19 +94,35 @@ const HowToPlayOverlay: React.FC<HowToPlayOverlayProps> = ({ onClose, isRotated 
 
                 <div className="flex-grow overflow-y-auto p-4 sm:p-6 space-y-6">
                     <section>
+                        <h3 className="text-lg font-bold text-cyan-300 mb-3">Interface Controls</h3>
+                        <div className="space-y-3">
+                            <InfoItem title="Toggle View" description="Switch between first-person and third-person camera views during gameplay.">
+                                <EyeIcon className="w-8 h-8 text-cyan-400" />
+                            </InfoItem>
+                            <InfoItem title="Audio Settings" description="Toggle game music and sound effects, or open the settings to tune into live radio stations.">
+                                <div className="flex gap-2">
+                                    <RadioIcon className="w-8 h-8 text-cyan-400" />
+                                    <MusicOnIcon className="w-8 h-8 text-cyan-400" />
+                                    <SfxOnIcon className="w-8 h-8 text-cyan-400" />
+                                </div>
+                            </InfoItem>
+                        </div>
+                    </section>
+
+                    <section>
                         <h3 className="text-lg font-bold text-cyan-300 mb-3">Core Maneuvers</h3>
                         <div className="space-y-3">
-                            <Maneuver title="90° Turn" description="Press once to make a sharp turn.">
+                            <InfoItem title="90° Turn" description="Press once to make a sharp turn.">
                                 <ArrowLeftIcon className="w-8 h-8 text-cyan-400" />
-                            </Maneuver>
-                            <Maneuver title="180° Turn" description="Quickly press the same direction twice to make a U-turn.">
+                            </InfoItem>
+                            <InfoItem title="180° Turn" description="Quickly press the same direction twice to make a U-turn.">
                                 <ArrowLeftIcon className="w-8 h-8 text-cyan-400" />
                                 <ArrowLeftIcon className="w-8 h-8 text-cyan-400" />
-                            </Maneuver>
-                            <Maneuver title="Sidestep" description="Quickly press opposite directions to shift one lane over.">
+                            </InfoItem>
+                            <InfoItem title="Sidestep" description="Quickly press opposite directions to shift one lane over.">
                                 <ArrowLeftIcon className="w-8 h-8 text-cyan-400" />
                                 <ArrowRightIcon className="w-8 h-8 text-cyan-400" />
-                            </Maneuver>
+                            </InfoItem>
                         </div>
                     </section>
 

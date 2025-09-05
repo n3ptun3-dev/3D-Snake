@@ -35,6 +35,11 @@ export const DEFAULT_CONFIG: GameConfig = {
     // Promotions
     promoTitle: '',
     promoDescription: '',
+    // Ad Pricing
+    priceBillboard: 3,
+    pricePoster: 1,
+    priceBanner: 1,
+    priceFlyer: 0.5,
 };
 
 /**
