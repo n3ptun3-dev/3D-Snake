@@ -1,6 +1,7 @@
+
 import * as THREE from 'three';
 import { GameState, Point3D, FruitType, LightEventType, LightEventData, LayoutDetails, ActiveEffect } from '../types';
-import { FRUIT_COLORS, FULL_BOARD_WIDTH, FULL_BOARD_DEPTH } from '../constants';
+import { FRUIT_COLORS, FULL_BOARD_WIDTH, FULL_BOARD_DEPTH, COLORS } from '../constants';
 import { isStreetPassageBlock } from './gameLogic';
 
 interface LightEffect {
@@ -71,7 +72,11 @@ export class LightingSystem {
                 }
                 break;
             case 'levelUp': newEffects.push(this.createLevelUpEffect()); break;
-            case 'turn': if (data.position && data.rotation !== undefined) { newEffects.push(this.createRunwayEffect(data.position, data.rotation)); } break;
+            case 'turn':
+                if (data.position && data.rotation !== undefined) {
+                    newEffects.push(this.createRunwayEffect(data.position, data.rotation));
+                }
+                break;
             case 'passageFruitSpawned':
                 if (data.fruitType !== undefined) {
                     this.activeEffects = this.activeEffects.filter(e => e.type !== 'passageGlow');
@@ -350,9 +355,12 @@ export class LightingSystem {
 
     private createSpeedBasedAmbientEffect(): LightEffect {
         const finalColor = new THREE.Color();
+        const NEUTRAL_COLOR = new THREE.Color(COLORS.GRID_LINES);
         const COOL_COLOR = new THREE.Color(0x00ffff);
         const WARM_COLOR = new THREE.Color(0xff8c00);
         const HOT_COLOR = new THREE.Color(0xff00ff);
+        
+        const NEUTRAL_SPEED_THRESHOLD = 2.5; // Corresponds to initial speed of 1000/400
         const MIN_SPEED = 3.0;
         const GRADIENT_MAX_SPEED = 8.0;
 
@@ -360,8 +368,12 @@ export class LightingSystem {
             id: ++this.effectIdCounter, startTime: performance.now(), duration: Infinity, type: 'ambient',
             update: (time, position, index, speedMps = 0) => {
                 let baseColor: THREE.Color;
-                if (speedMps < MIN_SPEED) {
-                    baseColor = COOL_COLOR;
+                
+                if (speedMps <= NEUTRAL_SPEED_THRESHOLD) {
+                    baseColor = NEUTRAL_COLOR;
+                } else if (speedMps < MIN_SPEED) {
+                    const progress = (speedMps - NEUTRAL_SPEED_THRESHOLD) / (MIN_SPEED - NEUTRAL_SPEED_THRESHOLD);
+                    baseColor = NEUTRAL_COLOR.clone().lerp(COOL_COLOR, progress);
                 } else if (speedMps <= GRADIENT_MAX_SPEED) {
                     const progress = (speedMps - MIN_SPEED) / (GRADIENT_MAX_SPEED - MIN_SPEED);
                     baseColor = progress < 0.5 ? COOL_COLOR.clone().lerp(WARM_COLOR, progress * 2) : WARM_COLOR.clone().lerp(HOT_COLOR, (progress - 0.5) * 2);
@@ -536,34 +548,30 @@ export class LightingSystem {
         };
     }
 
-    private createCrossfadeEffect({ duration }: { duration: number }): LightEffect {
-        const startTime = performance.now();
-        const baseColors = Array.from({ length: 4 }, () => new THREE.Color().setHSL(Math.random(), 0.8, 0.20));
-        const colorsWithBase: THREE.Color[] = [];
-        const baseColor = new THREE.Color(0x080810);
-        baseColors.forEach(color => {
-            colorsWithBase.push(color);
-            colorsWithBase.push(baseColor);
-        });
-        const fadeDuration = duration / colorsWithBase.length;
+    private createStaticRainbowEffect(): LightEffect {
+        const finalColor = new THREE.Color();
+        const center = new THREE.Vector3(0, 0, 0);
 
         return {
-            id: ++this.effectIdCounter, startTime, duration: Infinity, type: 'ambient',
+            id: ++this.effectIdCounter, startTime: performance.now(), duration: Infinity, type: 'ambient',
             update: (time, position) => {
-                const elapsed = time - startTime;
-                const phase = elapsed / fadeDuration;
-                const fromIndex = Math.floor(phase) % colorsWithBase.length;
-                const toIndex = (fromIndex + 1) % colorsWithBase.length;
-                const t = phase - Math.floor(phase);
-                return colorsWithBase[fromIndex].clone().lerp(colorsWithBase[toIndex], t);
+                const angle = Math.atan2(position.z - center.z, position.x - center.x);
+                const hue = (angle) / (Math.PI * 2);
+                
+                const distance = position.distanceTo(center);
+                const maxDist = FULL_BOARD_WIDTH / 2;
+                const lightness = 0.15 + (distance / maxDist) * 0.10;
+
+                finalColor.setHSL(hue < 0 ? 1 + hue : hue, 0.9, lightness);
+                return finalColor.clone();
             },
             isFinished: () => false,
         };
     }
     
-    private createBreathingEffect(): LightEffect {
+    private createBreathingEffect(colorInput?: THREE.Color): LightEffect {
         const startTime = performance.now();
-        const color = new THREE.Color(0x87CEEB); // Sky blue
+        const color = colorInput || new THREE.Color(0x87CEEB); // Default to sky blue if no color is provided
         const duration = 8000; // Slow 8-second cycle
     
         return {
@@ -581,32 +589,55 @@ export class LightingSystem {
 
     private createStarlightEffect(): LightEffect {
         const startTime = performance.now();
-        // This effect has internal state for the stars
         const stars: { x: number; z: number; startTime: number; duration: number; peak: number, color: THREE.Color }[] = [];
         const maxStars = 50;
         const spawnInterval = 200; // ms
         let lastSpawn = 0;
         const finalColor = new THREE.Color();
-        const palettes = [
-            new THREE.Color(0xffffff),
-            new THREE.Color(0xaaccff),
-            new THREE.Color(0xffddaa),
+        
+        // Sequential splash logic
+        const sequenceColors = [
+            new THREE.Color(0x00ffff), // Cyan/Blue
+            new THREE.Color(0x00ff00), // Green
+            new THREE.Color(0xff00ff), // Magenta
         ];
-    
+        let sequenceIndex = 0;
+        const sequenceInterval = 3000; // 3 seconds per splash
+        let lastSequenceSpawn = startTime - sequenceInterval; // Allow immediate spawn
+
         return {
             id: ++this.effectIdCounter, startTime, duration: Infinity, type: 'ambient',
             update: (time, position) => {
-                // Spawn new stars
-                if (time - lastSpawn > spawnInterval && stars.length < maxStars) {
-                    lastSpawn = time;
+                const elapsedSinceStart = time - startTime;
+
+                // Part 1: The sequential colored splashes.
+                if (sequenceIndex < sequenceColors.length && time - lastSequenceSpawn > sequenceInterval) {
+                    lastSequenceSpawn = time;
                     stars.push({
                         x: THREE.MathUtils.randFloatSpread(FULL_BOARD_WIDTH),
                         z: THREE.MathUtils.randFloatSpread(FULL_BOARD_DEPTH),
                         startTime: time,
-                        duration: THREE.MathUtils.randFloat(3000, 6000),
-                        peak: THREE.MathUtils.randFloat(0.3, 0.7),
-                        color: palettes[Math.floor(Math.random() * palettes.length)],
+                        duration: sequenceInterval * 0.9, // Lasts for most of the interval
+                        peak: 0.8, // Make them bright
+                        color: sequenceColors[sequenceIndex],
                     });
+                    sequenceIndex++;
+                }
+
+                // Part 2: After the sequence, transition to more subtle, random sparkles.
+                const randomSparkleStartTime = sequenceColors.length * sequenceInterval + 1000; // Start after a small delay
+                if (elapsedSinceStart > randomSparkleStartTime) {
+                    if (time - lastSpawn > spawnInterval && stars.length < maxStars) {
+                        lastSpawn = time;
+                        stars.push({
+                            x: THREE.MathUtils.randFloatSpread(FULL_BOARD_WIDTH),
+                            z: THREE.MathUtils.randFloatSpread(FULL_BOARD_DEPTH),
+                            startTime: time,
+                            duration: THREE.MathUtils.randFloat(3000, 6000),
+                            peak: THREE.MathUtils.randFloat(0.3, 0.7),
+                            color: new THREE.Color(0xffffff), // Just white sparkles
+                        });
+                    }
                 }
     
                 // Remove old stars that have faded out
@@ -622,7 +653,7 @@ export class LightingSystem {
                 // Update and blend colors from existing stars
                 for (const star of stars) {
                     const dist = Math.hypot(position.x - star.x, position.z - star.z);
-                    const starRadius = 2.0;
+                    const starRadius = 4.0; // Widened for noticeability
                     if (dist < starRadius) { 
                         const lifeProgress = (time - star.startTime) / star.duration;
                         const brightness = Math.sin(lifeProgress * Math.PI) * star.peak; // Fade in and out
@@ -683,7 +714,7 @@ export class LightingSystem {
             },
             { // Movement 3: Adagio - Lyrical, beautiful, and serene.
                 duration: 24000,
-                effectGenerators: [() => this.createCrossfadeEffect({ duration: 16000 }), () => this.createSparkleEffect()]
+                effectGenerators: [() => this.createStaticRainbowEffect()]
             },
             { // Movement 4: Finale - High energy, vibrant, and chaotic.
                 duration: 20000,
@@ -961,47 +992,71 @@ export class LightingSystem {
     private createRunwayEffect(origin: Point3D, rotation: number): LightEffect {
         const id = ++this.effectIdCounter;
         const startTime = performance.now();
-        const duration = 1000; // Make it a bit faster
+        const duration = 1000;
         const color = new THREE.Color(0x00ffff).multiplyScalar(1.5); // Brighter cyan
         const originGrid = { x: origin.x, z: origin.z };
         const forwardVec = { x: -Math.round(Math.sin(rotation)), z: -Math.round(Math.cos(rotation)) };
         const rightVec = { x: -forwardVec.z, z: forwardVec.x };
-
+    
+        // Common logic for calculating intensity based on position in the wave
+        const calculateIntensity = (time: number, gridX: number, gridZ: number): number | null => {
+            const elapsed = time - startTime;
+            if (elapsed < 0) return null;
+    
+            const progress = elapsed / duration;
+            if (progress > 1) return null;
+    
+            const pathLength = 20.0;
+            const patchCenterDist = progress * pathLength;
+            
+            const relativePos = { x: gridX - originGrid.x, z: gridZ - originGrid.z };
+            
+            const distAlongPath = relativePos.x * forwardVec.x + relativePos.z * forwardVec.z;
+            const distFromCenterline = Math.abs(relativePos.x * rightVec.x + relativePos.z * rightVec.z);
+    
+            const runwayWidth = 1.5;
+            const patchLength = 3.0;
+    
+            // Make sure we are only looking forward from the turn point
+            if (distAlongPath < -patchLength / 2 || distFromCenterline > runwayWidth) {
+                return null;
+            }
+    
+            const delta = Math.abs(distAlongPath - patchCenterDist);
+    
+            if (delta < patchLength / 2) {
+                // Intensity fades as the wave moves forward and based on distance from the wave's center
+                const intensity = (1 - (delta / (patchLength / 2))) * (1 - progress * 0.75);
+                return intensity;
+            }
+            
+            return null;
+        };
+    
         return {
             id, startTime, duration, type: 'event',
-            // This effect doesn't need the general update method
-            update: () => null,
             isFinished: (time) => time > startTime + duration,
-            updateTile: (time, gridX, gridZ) => {
-                const elapsed = time - startTime;
-                if (elapsed < 0) return null;
-
-                const progress = elapsed / duration;
-                if (progress > 1) return null;
-
-                const pathLength = 20.0; // How far the light travels in total
-                const patchCenterDist = progress * pathLength;
+            
+            // This method will be called for both grid line vertices and building instance centers
+            update: (time, worldPosition) => {
+                const gridX = Math.round(worldPosition.x - offsetX);
+                const gridZ = Math.round(worldPosition.z - offsetZ);
+    
+                const intensity = calculateIntensity(time, gridX, gridZ);
                 
-                const relativePos = { x: gridX - originGrid.x, z: gridZ - originGrid.z };
-                
-                // Project the tile's position onto the runway's path
-                const distAlongPath = relativePos.x * forwardVec.x + relativePos.z * forwardVec.z;
-                const distFromCenterline = Math.abs(relativePos.x * rightVec.x + relativePos.z * rightVec.z);
-
-                const runwayWidth = 1.5; // Half-width (total width is 3)
-                const patchLength = 3.0; // Total length of the light patch
-
-                if (distFromCenterline > runwayWidth) {
-                    return null;
-                }
-
-                const delta = Math.abs(distAlongPath - patchCenterDist);
-
-                if (delta < patchLength / 2) {
-                    const intensity = (1 - (delta / (patchLength / 2))) * (1 - progress * 0.75);
+                if (intensity !== null && intensity > 0) {
                     return color.clone().multiplyScalar(intensity);
                 }
                 
+                return null;
+            },
+    
+            // This method is called for the board tiles
+            updateTile: (time, gridX, gridZ) => {
+                const intensity = calculateIntensity(time, gridX, gridZ);
+                if (intensity !== null && intensity > 0) {
+                    return color.clone().multiplyScalar(intensity);
+                }
                 return null;
             },
         };

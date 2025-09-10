@@ -1,3 +1,4 @@
+
 import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle, useCallback } from 'react';
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -877,7 +878,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
         state.currentSnakeSegments = snakeSegments;
         state.prevSnakeRotation = state.isInitialRender ? snakeRotation : state.currentSnakeRotation;
         state.currentSnakeRotation = snakeRotation;
-        state.lastTickTime = Date.now();
+        state.lastTickTime = performance.now();
         if (state.isInitialRender) state.isInitialRender = false;
     }
   }, [gameSpeed, cameraView, snakeSegments, snakeRotation, visualRotation, isCrashing, isPaused, fruits, clearingFruits, activeEffects, isPassageFruitActive, gameState, layoutDetails, graphicsQuality, weather, score, level]);
@@ -934,7 +935,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
           const startQuat = state.camera.quaternion.clone();
 
           state.startAnim = {
-              startTime: Date.now() + 1000,
+              startTime: performance.now() + 1000,
               duration: 3000,
               startPos,
               startQuat,
@@ -953,7 +954,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
 
           state.crashAnim = {
               phase: 'shake',
-              startTime: Date.now(),
+              startTime: performance.now(),
               shakeDuration: 1500,
               ascendDuration: 2000,
               startPos: state.camera.position.clone(),
@@ -975,7 +976,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
         );
 
         state.gameOverAnim = {
-            startTime: Date.now(),
+            startTime: performance.now(),
             duration: 2000,
             startPos: state.camera.position.clone(),
             startQuat: state.camera.quaternion.clone(),
@@ -1163,7 +1164,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
                         altitude: droneAltitudes[i],
                         currentPosition: startPos.clone(),
                         targetPosition: new THREE.Vector3((Math.random() - 0.5) * 20, droneAltitudes[i], (Math.random() - 0.5) * 20),
-                        startTime: Date.now(),
+                        startTime: performance.now(),
                         duration: 8000 + Math.random() * 4000
                     };
                 } else { 
@@ -1362,7 +1363,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
               const { cameraView, snakeHead, snakeBody, snakeTail, dummy, glowPlanes, towerLights, reusable, interpolatedPositions, fruitMeshes, appleGlows, fruitShadows, searchlightBeams, searchlightTargets, fruits: currentFruits, clearingFruits, activeEffects, isPassageFruitActive, bloomPass: currentBloomPass, portalGroups, drones, droneTargets, rotatingIcons, startAnim, crashAnim, gameOverAnim, lightingSystem } = animState;
               if (!snakeHead || !snakeBody || !dummy || !glowPlanes || !reusable || !interpolatedPositions || !fruitMeshes || !appleGlows || !fruitShadows || !currentFruits || !clearingFruits || !activeEffects || !currentBloomPass || !portalGroups) return;
               
-              const now = Date.now();
+              const now = performance.now();
               const speedMps = 1000 / animState.gameSpeed;
               const isSnakeVisible = animState.gameState !== 'Starting' || !startAnim;
               const snakeHeadPos = isSnakeVisible && interpolatedPositions && interpolatedPositions.length > 0 ? interpolatedPositions[0] : null;
@@ -1435,72 +1436,78 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
               if (reusable.boardInstance && animState.layoutDetails && lightingSystem) {
                 const boardInstance = reusable.boardInstance;
                 const layoutDetails = animState.layoutDetails;
-            
-                const fruitsForHighlight = [...currentFruits, ...clearingFruits.map(cf => cf.fruit)];
-                const boardFruits = fruitsForHighlight.filter(f => FRUIT_CATEGORIES[f.type] !== 'PASSAGE');
-            
+                
+                // Build a map of what fruits are on which coordinate lines.
+                // This is more efficient than iterating through all fruits for every single tile.
                 const highlightMap = new Map<string, Fruit[]>();
-            
+                const allFruitsForHighlighting = [...currentFruits, ...clearingFruits.map(cf => cf.fruit)];
+                const boardFruits = allFruitsForHighlighting.filter(f => FRUIT_CATEGORIES[f.type] !== 'PASSAGE');
+
                 for (const fruit of boardFruits) {
                     const fx = fruit.position.x;
                     const fz = fruit.position.z;
-            
+
                     for (let x = WALL_THICKNESS; x < FULL_BOARD_WIDTH - WALL_THICKNESS; x++) {
                         const key = `${x},${fz}`;
                         if (!highlightMap.has(key)) highlightMap.set(key, []);
                         highlightMap.get(key)!.push(fruit);
                     }
-            
+
                     for (let z = WALL_THICKNESS; z < FULL_BOARD_DEPTH - WALL_THICKNESS; z++) {
                         const key = `${fx},${z}`;
                         if (!highlightMap.has(key)) highlightMap.set(key, []);
                         highlightMap.get(key)!.push(fruit);
                     }
                 }
-            
-                const targetColor = new THREE.Color();
+
+                const targetColor = reusable.tempColor;
                 for (let i = 0; i < boardInstance.count; i++) {
                     const x = Math.floor(i / FULL_BOARD_DEPTH);
                     const z = i % FULL_BOARD_DEPTH;
-            
+
                     const isStreet = isStreetPassageBlock(x, z, layoutDetails.street);
                     const originalTileColor = isStreet ? COLORS.STREET : ((x + z) % 2 === 0 ? COLORS.BOARD_LIGHT : COLORS.BOARD_DARK);
-            
                     targetColor.set(originalTileColor);
-            
+
                     const tileFruits = highlightMap.get(`${x},${z}`);
                     if (tileFruits) {
-                        const activeHighlightColors: THREE.Color[] = [];
+                        const highlightColorsToShow: THREE.Color[] = [];
                         
-                        const activeFruits = tileFruits.filter(f => !clearingFruits.some(cf => cf.fruit.id === f.id));
-                        const clearingFruitsOnTile = tileFruits
-                            .map(f => clearingFruits.find(cf => cf.fruit.id === f.id))
-                            .filter((cf): cf is { fruit: Fruit; startTime: number } => !!cf);
-
-                        activeFruits.forEach(f => activeHighlightColors.push(new THREE.Color(FRUIT_COLORS[f.type])));
-
-                        if (clearingFruitsOnTile.length > 0 && activeFruits.length === 0) {
-                            const mostRecentClearing = clearingFruitsOnTile.reduce((a, b) => a.startTime > b.startTime ? a : b);
-                            const { fruit, startTime } = mostRecentClearing;
-
-                            const elapsed = now - startTime;
+                        for (const fruit of tileFruits) {
+                            const clearingInfo = clearingFruits.find(cf => cf.fruit.id === fruit.id);
                             const tileDist = Math.abs(x - fruit.position.x) + Math.abs(z - fruit.position.z);
-                            const WAVE_SPEED = 30; // grid units per second
-                            const waveDist = (elapsed / 1000) * WAVE_SPEED;
-                            
-                            if (tileDist >= waveDist) {
-                                clearingFruitsOnTile.forEach(cf => activeHighlightColors.push(new THREE.Color(FRUIT_COLORS[cf.fruit.type])));
+                            const waveSpeed = 30; // grid units per second
+
+                            if (clearingInfo) {
+                                // This is a clearing wave. The highlight disappears as the wave passes.
+                                const elapsed = now - clearingInfo.startTime;
+                                const waveDist = (elapsed / 1000) * waveSpeed;
+                                
+                                // Show color only if the wave has NOT reached the tile yet.
+                                if (tileDist > waveDist) {
+                                    highlightColorsToShow.push(new THREE.Color(FRUIT_COLORS[fruit.type]));
+                                }
+                            } else {
+                                // This is a spawn wave. The highlight appears as the wave passes.
+                                const spawnElapsed = now - fruit.spawnTime;
+                                const waveDist = (spawnElapsed / 1000) * waveSpeed;
+                                const spawnAnimDuration = 750; // ms
+
+                                // Show color if the wave has passed the tile, or if the animation is over.
+                                if (spawnElapsed > spawnAnimDuration || tileDist < waveDist) {
+                                     highlightColorsToShow.push(new THREE.Color(FRUIT_COLORS[fruit.type]));
+                                }
                             }
                         }
 
-                        if (activeHighlightColors.length > 0) {
-                            const finalColor = reusable.tempColor.setRGB(0, 0, 0);
-                            activeHighlightColors.forEach(c => finalColor.add(c));
-                            finalColor.multiplyScalar(1 / activeHighlightColors.length);
+                        if (highlightColorsToShow.length > 0) {
+                            const finalColor = new THREE.Color(0,0,0);
+                            highlightColorsToShow.forEach(c => finalColor.add(c));
+                            finalColor.multiplyScalar(1 / highlightColorsToShow.length);
                             targetColor.lerp(finalColor, 0.4);
                         }
                     }
-
+                    
                     const runwayColor = lightingSystem.getTileEffects(x, z, now);
                     if (runwayColor) {
                         targetColor.add(runwayColor);
@@ -2938,7 +2945,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
                 material.emissiveMap = state.billboardSlides[0].texture;
                 material.needsUpdate = true;
                 state.currentBillboardSlideIndex = 0;
-                state.lastBillboardSlideTime = Date.now();
+                state.lastBillboardSlideTime = performance.now();
             }
         };
         setupSlideshow();
@@ -3009,7 +3016,7 @@ const chooseNextDroneAction = (animState: typeof Board.prototype.animationRef.cu
     const { bannerMeshes, snakeHead, layoutDetails, maxBuildingHeight, reusable, billboardScreen } = animState;
     if (!layoutDetails || !reusable) {
       const idleAction = { type: 'IDLE' } as DroneAction;
-      return { startTime: Date.now(), startPos, startQuat, targetPos: startPos, targetQuat: startQuat, approachDuration: 0, mainActionDuration: 2000, totalDuration: 2000, arcHeight: 0, mainAction: idleAction };
+      return { startTime: performance.now(), startPos, startQuat, targetPos: startPos, targetQuat: startQuat, approachDuration: 0, mainActionDuration: 2000, totalDuration: 2000, arcHeight: 0, mainAction: idleAction };
     }
 
     const actions = [
@@ -3214,7 +3221,7 @@ const chooseNextDroneAction = (animState: typeof Board.prototype.animationRef.cu
     const totalDuration = approachDuration + mainActionDuration;
 
     return {
-        startTime: Date.now(),
+        startTime: performance.now(),
         startPos, startQuat,
         targetPos, targetQuat,
         approachDuration,

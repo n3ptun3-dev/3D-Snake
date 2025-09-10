@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AdType, Sponsor, AdSubmissionData, BookedSlots, ApprovedAd, GameConfig, PromoCode, UserDTO } from '../types';
-import { submitAd, generatePaymentId, logAdClick, fetchBookedSlots, confirmPayment } from '../utils/sponsors';
+import { AdType, Sponsor, AdSubmissionData, BookedSlots, ApprovedAd, GameConfig, PromoCode, UserDTO, PaymentDTO } from '../types';
+import { submitAd, generatePaymentId, logAdClick, fetchBookedSlots } from '../utils/sponsors';
 import { XIcon, SpinnerIcon, MegaphoneIcon, CalendarIcon, CopyIcon, ChevronLeftIcon, ChevronRightIcon } from './icons';
 import HowItWorksOverlay from './HowItWorksOverlay';
 import { piService } from '../utils/pi';
+import { BACKEND_URL } from '../config';
 
 interface AdvertisingOverlayProps {
   onClose: () => void;
@@ -384,6 +385,13 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
                 const slots = await fetchBookedSlots();
                 setBookedSlots(slots);
                 setView('select_type');
+                
+                // Show "How It Works" on first visit per session.
+                const hasSeen = sessionStorage.getItem('hasSeenAdHowItWorks');
+                if (!hasSeen) {
+                    setIsHowItWorksOpen(true);
+                    sessionStorage.setItem('hasSeenAdHowItWorks', 'true');
+                }
             } catch (err) {
                 setError("Could not load advertising data. Please try again later.");
                 console.error(err);
@@ -1025,14 +1033,11 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({ data, onConfirm, onBack, 
         setError(null);
     
         try {
-            // Step 1: Submit the ad data to the Google Form to create the record.
-            // This is the "fire-and-forget" part of the process.
             await submitAd(data);
     
-            // Step 2: Initiate the Pi Payment flow.
             const paymentData = {
                 amount: data.price,
-                memo: data.paymentId, // This is crucial for matching the payment.
+                memo: data.paymentId,
                 metadata: { 
                     title: data.title,
                     adType: data.adType,
@@ -1041,41 +1046,69 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({ data, onConfirm, onBack, 
             };
     
             const callbacks = {
-                onReadyForServerApproval: (paymentId: string) => {
-                    // This is called when the payment is created. In a full backend setup,
-                    // we'd notify our server to approve it. In the sandbox, it can auto-approve.
-                    // We've already submitted the form, so no action is needed here for our flow.
+                onReadyForServerApproval: async (paymentId: string) => {
                     console.log('Pi Payment ready for server approval:', paymentId);
-                },
-                onReadyForServerCompletion: async (payment: any) => {
-                    // This is called after the user confirms the payment in the Pi dialog.
-                    console.log('Pi Payment ready for server completion:', payment);
                     try {
-                        // Step 3: Call our backend to confirm the payment, which updates the spreadsheet.
-                        await confirmPayment(payment.identifier); // payment.identifier is the paymentId
-                        // This onConfirm prop will change the view to the "Thank You" screen.
-                        await onConfirm(data);
-                    } catch (e) {
-                        const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred.';
-                        setError(`Failed to confirm payment with our server. Please contact support with your Payment ID: ${data.paymentId}. Error: ${errorMessage}`);
+                        const response = await fetch(`${BACKEND_URL}/approvePayment`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ paymentId }),
+                        });
+                        if (!response.ok) {
+                            const errorData = await response.json().catch(() => ({}));
+                            throw new Error(errorData.error || 'Backend approval failed.');
+                        }
+                        console.log('Backend successfully approved payment:', paymentId);
+                    } catch (err) {
+                        const errorMessage = err instanceof Error ? err.message : 'Unknown approval error.';
+                        console.error('Error in onReadyForServerApproval:', errorMessage);
+                        setError(`Could not approve payment. Please contact support. ID: ${paymentId}`);
                         setStatus('error');
                     }
                 },
-                onCancel: () => {
-                    setStatus('idle');
-                    setError('Payment was cancelled.');
+                onReadyForServerCompletion: async (payment: PaymentDTO) => {
+                    const paymentId = payment.identifier;
+                    const txid = payment.transaction?.txid;
+                    console.log('Pi Payment ready for server completion:', paymentId, txid);
+                    if (!txid) {
+                        setError(`Payment completion failed: Missing transaction ID (TXID).`);
+                        setStatus('error');
+                        return;
+                    }
+                    try {
+                        const response = await fetch(`${BACKEND_URL}/completePayment`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ paymentId, txid }),
+                        });
+
+                        if (!response.ok) {
+                            const errorData = await response.json().catch(() => ({}));
+                            throw new Error(errorData.error || 'Backend completion failed.');
+                        }
+                        console.log('Backend successfully completed payment:', paymentId);
+                        await onConfirm(data);
+                    } catch (err) {
+                        const errorMessage = err instanceof Error ? err.message : 'Unknown completion error.';
+                        console.error('Error in onReadyForServerCompletion:', errorMessage);
+                        setError(`Payment confirmation failed. Please contact support. ID: ${paymentId}. Error: ${errorMessage}`);
+                        setStatus('error');
+                    }
                 },
-                onError: (error: any) => {
+                onCancel: (paymentId: string) => {
+                    setStatus('idle');
+                    setError(`Payment was cancelled (ID: ${paymentId}).`);
+                },
+                onError: (error: Error, payment?: PaymentDTO) => {
                     setStatus('error');
                     setError(error.message || 'An unknown error occurred during payment.');
-                    console.error('Pi Payment Error:', error);
+                    console.error('Pi Payment Error:', error, payment);
                 },
             };
             
             piService.createPayment(paymentData, callbacks);
     
         } catch (e) {
-            // This catches errors from the initial `submitAd` call.
             const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred.';
             setError(`Failed to prepare your ad for payment. Please try again. Error: ${errorMessage}`);
             setStatus('error');

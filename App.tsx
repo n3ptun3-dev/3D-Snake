@@ -1,3 +1,5 @@
+
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Board, { BoardRef } from './components/Board';
 import Controls from './components/Controls';
@@ -24,7 +26,8 @@ import { fetchLeaderboard } from './utils/leaderboard';
 import { getInitialConfig, fetchAndCacheGameConfig } from './utils/gameConfig';
 import { fetchApprovedAds, logAdClick, fetchPromoCodes } from './utils/sponsors';
 import { SpinnerIcon } from './components/icons';
-import { piService } from './utils/pi';
+import { piService, DUMMY_MODE } from './utils/pi';
+import { logger } from './utils/logger';
 
 const WALL_THICKNESS = (FULL_BOARD_WIDTH - BOARD_WIDTH) / 2;
 
@@ -61,7 +64,7 @@ const getInitialFruits = (currentSnake: Point3D[], currentLayoutDetails: LayoutD
   const initialFruits: Fruit[] = [];
   const applePos = getBoardSpawnPoint(currentSnake, [], currentLayoutDetails);
   if (applePos) {
-    initialFruits.push({ id: Date.now(), type: FruitType.APPLE, position: applePos });
+    initialFruits.push({ id: Date.now(), type: FruitType.APPLE, position: applePos, spawnTime: performance.now() });
   }
   // For initial spawn, we still use the simple chance, bucket will be used for subsequent spawns.
   const passagePos = getStreetPassageSpawnPoint(currentLayoutDetails);
@@ -70,7 +73,7 @@ const getInitialFruits = (currentSnake: Point3D[], currentLayoutDetails: LayoutD
       if (passageFruitType === FruitType.EXTRA_LIFE && totalExtraLivesCollected >= config.maxExtraLivesTotal) {
           passageFruitType = FruitType.TRIPLE;
       }
-      initialFruits.push({ id: Date.now() + 1, type: passageFruitType, position: passagePos });
+      initialFruits.push({ id: Date.now() + 1, type: passageFruitType, position: passagePos, spawnTime: performance.now() });
   }
   return initialFruits;
 };
@@ -208,7 +211,7 @@ const App: React.FC = () => {
   const [crashOutcome, setCrashOutcome] = useState<'respawn' | 'gameOver' | null>(null);
   const [nextSnake, setNextSnake] = useState<Point3D[] | null>(null);
   const [isGameOverHudVisible, setIsGameOverHudVisible] = useState(false);
-
+  
   const animationFrameRef = useRef<number | null>(null);
   const passageFruitRetryTimer = useRef<number | null>(null);
   const commandQueue = useRef<('left' | 'right')[]>([]);
@@ -244,7 +247,7 @@ const App: React.FC = () => {
     const unsubscribe = piService.subscribe(setPiUser);
     return unsubscribe;
   }, []);
-  
+
   useEffect(() => {
     // When the rotation state changes, the CSS takes a moment to apply.
     // We wait for that, then manually tell the Board component to resize its canvas.
@@ -524,7 +527,7 @@ const App: React.FC = () => {
     }
 
     const interval = setInterval(() => {
-      const now = Date.now();
+      const now = performance.now();
       setActiveEffects(prevEffects => {
         const nextEffects = prevEffects.filter(effect => {
           if (effect.duration === 0) return true; // Persistent effects
@@ -591,7 +594,7 @@ const App: React.FC = () => {
     if (clearingFruits.length === 0) return;
     const CLEAR_DURATION = 1000; // ms
     const interval = setInterval(() => {
-        const now = Date.now();
+        const now = performance.now();
         setClearingFruits(prev => prev.filter(cf => now < cf.startTime + CLEAR_DURATION));
     }, 200);
     return () => clearInterval(interval);
@@ -951,7 +954,7 @@ const App: React.FC = () => {
     if (gameState !== 'Playing' || isPaused || !gameConfig) return;
     const intervalId = setInterval(() => {
       const boardFruit = fruitsRef.current.find(f => FRUIT_CATEGORIES[f.type] === 'BOARD');
-      if (boardFruit && (Date.now() - boardFruit.id > gameConfig.boardFruitLifetime)) {
+      if (boardFruit && (performance.now() - boardFruit.spawnTime > gameConfig.boardFruitLifetime)) {
         setFruits(prev => prev.filter(f => f.id !== boardFruit.id));
         setBoardFruitCooldown(true);
         setTimeout(() => setBoardFruitCooldown(false), gameConfig.boardFruitCooldown);
@@ -983,7 +986,7 @@ const App: React.FC = () => {
 
         const newType = possibleBoardTypes[Math.floor(Math.random() * possibleBoardTypes.length)];
         const newPos = getBoardSpawnPoint(snakeRef.current.segments, fruitsRef.current, layoutDetailsRef.current!);
-        if (newPos) setFruits(prev => [...prev, { id: Date.now(), type: newType, position: newPos }]);
+        if (newPos) setFruits(prev => [...prev, { id: Date.now(), type: newType, position: newPos, spawnTime: performance.now() }]);
     }, gameConfig.boardFruitSpawnDelay);
     return () => clearInterval(intervalId);
   }, [gameState, isPaused, boardFruitCooldown, gameConfig]);
@@ -1019,7 +1022,7 @@ const App: React.FC = () => {
             const newType = bucket.pop()!;
             setStreetFruitBucket(bucket); // Update state for next spawn
 
-            setFruits(prev => [...prev, { id: Date.now(), type: newType, position: newPos }]);
+            setFruits(prev => [...prev, { id: Date.now(), type: newType, position: newPos, spawnTime: performance.now() }]);
             boardRef.current?.triggerLightEvent('passageFruitSpawned', { fruitType: newType });
             setIsPassageFruitActive(true);
             if (passageFruitRetryTimer.current) clearTimeout(passageFruitRetryTimer.current);
@@ -1159,16 +1162,16 @@ const App: React.FC = () => {
             switch (f.type) {
                 case FruitType.SLOW_DOWN: 
                     setBaseGameSpeed(gs => gs + gameConfigRef.current!.slowDownEffectValue); 
-                    newEffects.push({id: f.id, type: f.type, startTime: Date.now(), duration: getEffectDuration(f.type)}); 
+                    newEffects.push({id: f.id, type: f.type, startTime: performance.now(), duration: getEffectDuration(f.type)}); 
                     audioManager.playSlowDownSound(); 
                     break;
                 case FruitType.EXTRA_LIFE: 
                     livesGained++; 
-                    newEffects.push({id: f.id, type: f.type, startTime: Date.now(), duration: getEffectDuration(f.type)}); 
+                    newEffects.push({id: f.id, type: f.type, startTime: performance.now(), duration: getEffectDuration(f.type)}); 
                     audioManager.playExtraLifeSound(); 
                     break;
                 default: 
-                    newEffects.push({id: f.id, type: f.type, startTime: Date.now(), duration: getEffectDuration(f.type)});
+                    newEffects.push({id: f.id, type: f.type, startTime: performance.now(), duration: getEffectDuration(f.type)});
                     if (f.type === FruitType.SPEED_BOOST) audioManager.playSpeedBoostSound();
                     else if (f.type === FruitType.MAGNET) audioManager.playMagnetSound();
                     else if (f.type === FruitType.SCORE_DOUBLER) audioManager.playScoreDoublerSound();
@@ -1198,7 +1201,7 @@ const App: React.FC = () => {
         
         const fruitsToClear = fruitsRef.current.filter(f => eatenIds.has(f.id));
         if (fruitsToClear.length > 0) {
-            setClearingFruits(prev => [...prev, ...fruitsToClear.map(fruit => ({ fruit, startTime: Date.now() }))]);
+            setClearingFruits(prev => [...prev, ...fruitsToClear.map(fruit => ({ fruit, startTime: performance.now() }))]);
         }
         
         let nextFruits = fruitsRef.current.filter(f => !eatenIds.has(f.id));
@@ -1208,7 +1211,7 @@ const App: React.FC = () => {
             const futureSnake = [newHead, ...snakeRef.current.segments];
             for (let i = 0; i < eatenAppleCount; i++) { 
                 const p = getBoardSpawnPoint(futureSnake, nextFruits, layoutDetailsRef.current!); 
-                if(p) nextFruits.push({id: Date.now() + i, type: FruitType.APPLE, position: p}); 
+                if(p) nextFruits.push({id: Date.now() + i, type: FruitType.APPLE, position: p, spawnTime: performance.now()}); 
             } 
         }
         setFruits(nextFruits);

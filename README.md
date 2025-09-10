@@ -13,7 +13,7 @@
 
 Experience the thrill of 3D Snake live in your browser!
 
-**[➡️ Play Now!](https://d-snake-7a80a.web.app/)** 
+**[➡️ Play Now!](https://your-live-url.com)** _(Replace with your game's URL)_
 
 ---
 

@@ -6,7 +6,7 @@
   "scripts": {
     "build": "npm run build:copy-public && npm run build:copy-root && npm run build:copy-audio && npm run build:tailwind && npm run build:esbuild",
     "build:copy-public": "npx copyfiles -u 1 public/**/* dist",
-    "build:copy-root": "npx copyfiles pi.txt dist",
+    "build:copy-root": "npx copyfiles validation-key.txt dist",
     "build:copy-audio": "npx copyfiles -u 1 audio/**/* dist/audio",
     "build:tailwind": "npx tailwindcss -i ./styles.css -o ./dist/styles.css --minify",
     "build:esbuild": "node build.mjs"

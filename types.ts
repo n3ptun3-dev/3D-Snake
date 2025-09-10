@@ -1,5 +1,4 @@
 
-
 export type GraphicsQuality = 'High' | 'Medium' | 'Low';
 
 export type Point3D = { x: number; y: number; z: number };
@@ -28,6 +27,7 @@ export type Fruit = {
   id: number;
   type: FruitType;
   position: Point3D;
+  spawnTime: number;
 };
 
 export type ActiveEffect = {
@@ -264,6 +264,11 @@ export interface PaymentDTO {
         developer_completed: boolean;
         cancelled: boolean;
         user_cancelled: boolean;
+    };
+    // Fix: Added optional transaction property to match Pi SDK payload.
+    transaction?: {
+        txid: string;
+        [key: string]: any;
     };
 }
 

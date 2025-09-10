@@ -28,7 +28,6 @@
     
     <!-- Pi Network SDK -->
     <script src="https://sdk.pi-network.dev/v2/pi-sdk.js"></script>
-    <script>Pi.init({ version: "2.0", sandbox: true });</script>
     
     <script type="importmap">
 {
@@ -69,7 +68,14 @@
   <body style="background-color: #262626;">
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
-    <script type="module" src="./index.tsx"></script>
+    <script type="module">
+      import { APP_VERSION } from './version.ts';
+      const mainScript = document.getElementById('main-script');
+      if (mainScript) {
+        mainScript.src = `./index.tsx?v=${APP_VERSION}`;
+      }
+    </script>
+    <script type="module" id="main-script"></script>
   <script type="module" src="/index.tsx"></script>
 </body>
 </html>

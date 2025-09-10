@@ -37,7 +37,6 @@ const APPROVED_ADS_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSdR-v
 const PROMO_CODES_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRrGcQhPRBIXl6IxbqBoc0h3j1Afk3v0p03BGKlxjft9RqttHaI49DD_tVG9KsezDXqD69kleaeGEXK/pub?output=csv';
 const REPORT_DISPLAYED_ADS_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSe51bcOZ-A7O-NrgbrSMkrpFLZzMW1cbbmHQUTTK5Me67uzlg/formResponse';
 const REPORT_DISPLAYED_ADS_ENTRY = 'entry.708158634';
-const CONFIRM_PAYMENT_URL = 'https://us-central1-d-snake-7a80a.cloudfunctions.net/api/confirm';
 
 const FORM_VALUE_TO_AD_TYPE: Record<string, AdType> = {
     '1': 'Billboard',
@@ -342,29 +341,6 @@ export const reportDisplayedAds = async (orderNumbers: string[]): Promise<void> 
         console.error('Failed to report displayed ads:', error);
     }
 };
-
-export const confirmPayment = async (paymentId: string): Promise<void> => {
-    try {
-        const response = await fetch(CONFIRM_PAYMENT_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ paymentId }),
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: 'Confirmation failed with non-JSON response' }));
-            throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-        }
-
-        console.log(`Payment confirmed for ${paymentId}`);
-    } catch (error) {
-        console.error('Failed to confirm payment:', error);
-        throw error; // Re-throw to be handled by the caller
-    }
-};
-
 
 export const generatePaymentId = (title: string): string => {
     const sanitizedTitle = title.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10).toUpperCase();
