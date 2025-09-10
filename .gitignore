@@ -31,6 +31,7 @@ lerna-debug.log*
 # =========================================
 # Never commit sensitive keys or environment-specific configurations.
 .env
+.env.*
 .env.local
 .env.development.local
 .env.test.local
