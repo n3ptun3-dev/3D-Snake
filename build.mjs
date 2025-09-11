@@ -1,8 +1,15 @@
-import esbuild from 'esbuild';
-import fs from 'fs';
+// --- START OF build.mjs ---
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
+import esbuild from 'esbuild';
 
-// Determine the environment ('testnet' or 'mainnet')
+const execPromise = promisify(exec);
+
+// --- Environment Variable Logic ---
+
 const environment = process.env.NODE_ENV;
 if (!environment) {
   console.error("❌ NODE_ENV is not set. Please use 'npm run build:testnet' or 'npm run build:mainnet'.");
@@ -12,101 +19,104 @@ console.log(`🚀 Building for environment: ${environment}`);
 
 const envFilePath = path.resolve(process.cwd(), `.env.${environment}`);
 
-// Function to parse .env file
-const parseEnvFile = (filePath) => {
-  if (!fs.existsSync(filePath)) {
-    console.error(`❌ Environment file not found at: ${filePath}`);
-    console.error("Please create it based on the documentation.");
+const parseEnvFile = (filePath, env) => {
+  if (!fsSync.existsSync(filePath)) {
+    console.warn(`⚠️ Environment file not found at: ${filePath}`);
+    if (env === 'testnet') {
+      console.log('✅ Using hardcoded fallback variables for testnet cloud build.');
+      return {
+        PI_SANDBOX: 'true',
+        BACKEND_URL: 'https://service-3d-snake-945566931016.us-west1.run.app/',
+        DUMMY_MODE: 'false',
+        FIREBASE_API_KEY: '',
+        FIREBASE_AUTH_DOMAIN: '',
+        FIREBASE_PROJECT_ID: 'd-snake-7a80a',
+        FIREBASE_STORAGE_BUCKET: '',
+        FIREBASE_MESSAGING_SENDER_ID: '',
+        FIREBASE_APP_ID: '',
+        FIREBASE_MEASUREMENT_ID: ''
+      };
+    }
+    console.error(`❌ Mainnet build failed: .env.mainnet file is required and was not found.`);
     process.exit(1);
   }
-  const envFileContent = fs.readFileSync(filePath, 'utf-8');
+
+  const envFileContent = fsSync.readFileSync(filePath, 'utf-8');
   const envars = {};
   envFileContent.split('\n').forEach(line => {
     const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
     if (match) {
       const key = match[1];
       let value = match[2] || '';
-      // Strip leading/trailing quotes
       if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
         value = value.slice(1, -1);
       }
       envars[key] = value;
     }
   });
+  console.log(`✅ Loaded environment variables from .env.${env}`);
   return envars;
 };
 
-// Load environment variables
-const envVars = parseEnvFile(envFilePath);
-console.log(`✅ Loaded environment variables from .env.${environment}`);
+const envVars = parseEnvFile(envFilePath, environment);
 
-// Create 'defines' for esbuild to replace process.env variables
 const defines = {};
 for (const key in envVars) {
   defines[`process.env.${key}`] = JSON.stringify(envVars[key]);
 }
 
-// Ensure dist directory exists and is clean
-const outdir = 'dist';
-if (fs.existsSync(outdir)) {
-    fs.rmSync(outdir, { recursive: true, force: true });
-}
-fs.mkdirSync(outdir);
-console.log('✅ Cleaned and created dist/ directory');
+// --- Build Process ---
 
-// Copy public files to dist
-fs.readdirSync('public').forEach(file => {
-    const source = path.join('public', file);
-    const destination = path.join(outdir, file);
-    fs.copyFileSync(source, destination);
-});
-console.log('✅ Copied public assets to dist/');
-
-// esbuild configuration
-esbuild.build({
-  entryPoints: {
-    // Naming the entry point 'bundle' to get 'bundle-HASH.js' as output
-    bundle: 'index.tsx' 
-  },
-  bundle: true,
-  outdir: outdir,
-  entryNames: '[name]-[hash]', // Use content hashing
-  define: defines,
-  jsx: 'automatic',
-  loader: { '.tsx': 'tsx', '.ts': 'ts' },
-  sourcemap: true,
-  logLevel: 'info',
-  metafile: true,
-}).then(result => {
-  console.log("esbuild finished. Updating index.html...");
-
-  // Get the output JS file name from the metafile
-  const outputFiles = Object.keys(result.metafile.outputs);
-  const jsFile = outputFiles.find(file => file.startsWith(`${outdir}/bundle-`) && file.endsWith('.js'));
-  
-  if (!jsFile) {
-    console.error('❌ Build error: Could not find the hashed output JS file.');
-    process.exit(1);
-  }
-
-  const newJsFileName = path.basename(jsFile);
-  const indexPath = path.join(outdir, 'index.html');
-
+async function build() {
+  const distDir = 'dist';
+  console.log('Starting build process...');
   try {
-    let indexHtmlContent = fs.readFileSync(indexPath, 'utf-8');
-    // Replace the placeholder script tag with the new hashed one
-    indexHtmlContent = indexHtmlContent.replace(
-      /src=".\/bundle\.js"/, 
-      `src="./${newJsFileName}"`
-    );
-    
-    fs.writeFileSync(indexPath, indexHtmlContent);
-    console.log(`✅ Success! Updated ${indexPath} to use ${newJsFileName}`);
+    console.log(`🧹 Cleaning '${distDir}' directory...`);
+    await fs.rm(distDir, { recursive: true, force: true });
+    await fs.mkdir(distDir);
+
+    console.log('🎨 Compiling Tailwind CSS...');
+    const tailwindCmd = `npx tailwindcss -i ./styles.css -o ./${distDir}/styles.css`;
+    await execPromise(tailwindCmd);
+    console.log('✅ Tailwind CSS compiled successfully.');
+
+    console.log('📦 Bundling JavaScript with esbuild...');
+    await esbuild.build({
+        entryPoints: ['./index.tsx'],
+        bundle: true,
+        outfile: `./${distDir}/bundle.js`,
+        define: defines,
+        jsx: 'automatic',
+        loader: { '.tsx': 'tsx', '.ts': 'ts' },
+        sourcemap: true,
+        logLevel: 'info',
+    });
+    console.log('✅ JavaScript bundled successfully.');
+
+    console.log('🚚 Copying static assets...');
+    const assetsToCopy = ['index.html', 'audio', 'validation-key.txt'];
+    for (const asset of assetsToCopy) {
+        try {
+            const sourcePath = path.resolve(process.cwd(), asset);
+            if (fsSync.existsSync(sourcePath)) {
+                const destPath = path.join(distDir, path.basename(asset));
+                await fs.cp(sourcePath, destPath, { recursive: true });
+                console.log(`   - Copied '${asset}'`);
+            } else {
+                 console.warn(`   - Asset '${asset}' not found, skipping copy.`);
+            }
+        } catch (error) {
+            console.error(`Error copying asset '${asset}':`, error);
+        }
+    }
+    console.log('✅ Static assets copied.');
+    console.log(`\n🎉 Build complete! Output is in the '${distDir}/' directory.`);
   } catch (error) {
-    console.error(`❌ Error updating index.html: ${error.message}`);
+    console.error('\n❌ Build failed:');
+    console.error(error.stderr || error.message);
     process.exit(1);
   }
-}).catch((e) => {
-    console.error("esbuild failed:", e);
-    process.exit(1);
-});
+}
+
+build();
+// --- END OF build.mjs ---

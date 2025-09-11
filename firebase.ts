@@ -1,26 +1,17 @@
 import { initializeApp, getApps } from "firebase/app";
-
-const firebaseConfig = {
-  apiKey: process.env.FIREBASE_API_KEY,
-  authDomain: process.env.FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.FIREBASE_APP_ID,
-  measurementId: process.env.FIREBASE_MEASUREMENT_ID
-};
+import { FIREBASE_CONFIG } from './config';
 
 /**
  * Initializes Firebase. Must be called and awaited before the
  * app is rendered.
  */
 export const initFirebase = async () => {
-  if (!firebaseConfig.apiKey) {
+  if (!FIREBASE_CONFIG.apiKey) {
     console.warn("Firebase config is missing. This is expected in the AI Studio development environment. Please ensure your .env.local file is set up for local development and environment variables are configured for deployment.");
     // Prevent the app from initializing Firebase without a key
     return;
   }
   if (getApps().length === 0) {
-    initializeApp(firebaseConfig);
+    initializeApp(FIREBASE_CONFIG);
   }
 };

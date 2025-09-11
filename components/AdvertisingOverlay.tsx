@@ -4,7 +4,7 @@ import { submitAd, generatePaymentId, logAdClick, fetchBookedSlots } from '../ut
 import { XIcon, SpinnerIcon, MegaphoneIcon, CalendarIcon, CopyIcon, ChevronLeftIcon, ChevronRightIcon } from './icons';
 import HowItWorksOverlay from './HowItWorksOverlay';
 import { piService } from '../utils/pi';
-import { BACKEND_URL } from '../config';
+import { DUMMY_MODE, BACKEND_URL } from '../config';
 
 interface AdvertisingOverlayProps {
   onClose: () => void;
@@ -731,7 +731,6 @@ const AdForm: React.FC<{
     });
     const [promoStatus, setPromoStatus] = useState<{ type: 'valid' | 'invalid' | 'idle', message: string }>({ type: 'idle', message: ''});
     const [bonusDates, setBonusDates] = useState<string[]>([]);
-    const isDummy = piService.isDummyMode();
     
     const isBillboard = adType === 'Billboard';
     const numDays = selectedDates.length;
@@ -950,7 +949,7 @@ const AdForm: React.FC<{
                         <button type="button" onClick={onBack} className="flex-1 py-2 px-4 bg-neutral-600 hover:bg-neutral-500 rounded-lg text-white font-bold transition-colors">Back</button>
                         <button type="submit" disabled={!formData.imageUrl || !formData.title} className="flex-1 py-2 px-4 bg-green-700 hover:bg-green-800 rounded-lg text-white font-bold transition-colors disabled:opacity-50 disabled:bg-green-700/50">Pay {totalPrice} Pi</button>
                     </div>
-                     {isDummy && (
+                     {DUMMY_MODE && (
                         <p className="text-center text-xs text-yellow-400 pt-2">
                             <strong>Test Mode:</strong> No real Pi will be charged. Feel free to test the submission process.
                         </p>
@@ -1026,7 +1025,6 @@ interface PaymentScreenProps {
 const PaymentScreen: React.FC<PaymentScreenProps> = ({ data, onConfirm, onBack, promoCodes, onOpenTerms, gameConfig }) => {
     const [status, setStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
     const [error, setError] = useState<string | null>(null);
-    const isDummy = piService.isDummyMode();
 
     const handlePayClick = async () => {
         setStatus('submitting');
@@ -1176,7 +1174,7 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({ data, onConfirm, onBack, 
                     {status === 'submitting' ? <SpinnerIcon className="w-6 h-6 animate-spin" /> : `Pay ${data.price.toFixed(2)} Pi`}
                 </button>
             </div>
-             {isDummy && (
+             {DUMMY_MODE && (
                 <p className="text-center text-xs text-yellow-400 mt-4">
                     <strong>Test Mode:</strong> No real Pi will be charged. This is a simulated transaction for testing purposes.
                 </p>

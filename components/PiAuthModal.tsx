@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { piService } from '../utils/pi';
 import { XIcon, SpinnerIcon } from './icons';
+import { DUMMY_MODE, PI_SANDBOX } from '../config';
 
 interface PiAuthModalProps {
     onClose: () => void;
@@ -22,7 +23,7 @@ const PiAuthModal: React.FC<PiAuthModalProps> = ({ onClose, onSuccess, isRotated
             if (err && err.code === 'USER_CANCELLED') {
                  setError('Authentication cancelled. Please authenticate to proceed.');
             } else {
-                 setError('Authentication failed. Please try again.');
+                 setError(err instanceof Error ? err.message : 'Authentication failed. Please try again.');
             }
             console.error(err);
         } finally {
@@ -33,6 +34,16 @@ const PiAuthModal: React.FC<PiAuthModalProps> = ({ onClose, onSuccess, isRotated
     const containerClasses = isRotated
         ? 'h-auto max-h-sm w-auto max-w-[80vw]'
         : 'w-full max-w-sm';
+        
+    const notice = DUMMY_MODE ? (
+      <div className="my-4 p-3 bg-yellow-900/50 border border-yellow-500/50 rounded-lg text-yellow-300 text-sm">
+        <strong>Developer Notice:</strong> This app is in DUMMY MODE for testing outside the Pi Browser. No real data is used.
+      </div>
+    ) : PI_SANDBOX ? (
+      <div className="my-4 p-3 bg-blue-900/50 border border-blue-500/50 rounded-lg text-blue-300 text-sm">
+        <strong>Developer Notice:</strong> This app is connected to the Pi Testnet Sandbox. No real Pi will be used for transactions.
+      </div>
+    ) : null;
 
     return (
         <div
@@ -50,9 +61,7 @@ const PiAuthModal: React.FC<PiAuthModalProps> = ({ onClose, onSuccess, isRotated
                 <h2 id="pi-auth-title" className="text-xl font-bold text-white mb-2">Authentication Required</h2>
                 <p className="text-neutral-300 mb-6">Please authenticate with your Pi account to use this feature.</p>
                 
-                <div className="my-4 p-3 bg-red-900/50 border border-red-500/50 rounded-lg text-red-300 text-sm">
-                    <strong>Developer Notice:</strong> This feature is in sandbox mode for testing. Please press "Authenticate with Pi" to continue with a test user—no real Pi will be used.
-                </div>
+                {notice}
 
                 <button 
                     onClick={handleAuth} 

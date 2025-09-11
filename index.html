@@ -24,26 +24,15 @@
     <meta property="twitter:description" content="The classic snake game, now in 3D and from the snake's point of view. Built with React and three.js.">
     <meta property="twitter:image" content="https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/Snake%20banner.jpg">
     
+    <!-- Tailwind Play CDN for AI Studio Preview -->
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="./styles.css" />
     
-    <!-- Pi Network SDK -->
-    <script src="https://sdk.pi-network.dev/v2/pi-sdk.js"></script>
+    <!-- Pi Network SDK is now loaded statically -->
+    <script src="https://sdk.pi-network.dev/v2/pi-sdk.js" defer></script>
     
-    <script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@18.3.1",
-    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
-    "three": "https://esm.sh/three@0.166.1",
-    "three/addons/": "https://esm.sh/three@0.166.1/addons/",
-    "firebase/app": "https://esm.sh/firebase@10.12.2/app",
-    "react-dom/": "https://esm.sh/react-dom@18.3.1/",
-    "react/": "https://esm.sh/react@18.3.1/",
-    "three/": "https://esm.sh/three@0.166.1/",
-    "firebase/": "https://esm.sh/firebase@10.12.2/"
-  }
-}
-</script>
 <style>
   html, body {
     margin: 0;
@@ -63,19 +52,25 @@
     overflow: hidden;
   }
 </style>
+<script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.1.1/",
+    "react/": "https://aistudiocdn.com/react@^19.1.1/",
+    "react": "https://aistudiocdn.com/react@^19.1.1",
+    "three/": "https://aistudiocdn.com/three@^0.180.0/",
+    "three": "https://aistudiocdn.com/three@^0.180.0",
+    "firebase/": "https://aistudiocdn.com/firebase@^12.2.1/"
+  }
+}
+</script>
 <link rel="stylesheet" href="/index.css">
 </head>
   <body style="background-color: #262626;">
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
-    <script type="module">
-      import { APP_VERSION } from './version.ts';
-      const mainScript = document.getElementById('main-script');
-      if (mainScript) {
-        mainScript.src = `./index.tsx?v=${APP_VERSION}`;
-      }
-    </script>
-    <script type="module" id="main-script"></script>
+    <!-- This now points to the compiled JavaScript bundle -->
+    <script type="module" src="./bundle.js"></script>
   <script type="module" src="/index.tsx"></script>
 </body>
 </html>

@@ -1,11 +1,6 @@
 import { AuthResult, UserDTO, PiScopes, PaymentDTO } from '../types';
 import { logger } from './logger';
-import { BACKEND_URL } from '../config';
-
-// To switch between real Pi integration and testing, set this flag.
-// true: Simulates API calls with dummy data, no real Pi transactions.
-// false: Uses the live Pi SDK for authentication and payments.
-export const DUMMY_MODE = false;
+import { PI_SANDBOX, BACKEND_URL, DUMMY_MODE } from '../config';
 
 class PiService {
   private user: UserDTO | null = null;
@@ -31,13 +26,35 @@ class PiService {
     return this.user;
   }
 
-  public isDummyMode(): boolean {
-    return DUMMY_MODE;
+  /**
+   * Waits for the Pi SDK to be loaded by the static script tag in index.html.
+   */
+  private async waitForPiSdk(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timeout = 10000; // 10 seconds
+      const interval = 100; // check every 100ms
+      let elapsedTime = 0;
+
+      logger.log('Waiting for Pi SDK script to load...');
+      const check = () => {
+        if (typeof window.Pi?.init === 'function') {
+          logger.log(`Pi SDK is ready after ${elapsedTime}ms.`);
+          resolve();
+        } else {
+          elapsedTime += interval;
+          if (elapsedTime >= timeout) {
+            reject(new Error(`Pi SDK did not load within ${timeout / 1000} seconds. Check network or script tag.`));
+          } else {
+            setTimeout(check, interval);
+          }
+        }
+      };
+      check();
+    });
   }
   
   /**
-   * Initializes the Pi SDK. This should be called once when the application starts.
-   * It waits for the SDK script to load, then calls Pi.init().
+   * Initializes the Pi SDK. Assumes the SDK is loaded via a static <script> tag.
    */
   public async initSdk(): Promise<void> {
     logger.log('Attempting to initialize Pi SDK...');
@@ -46,40 +63,20 @@ class PiService {
       return;
     }
 
-    if (typeof window.Pi === 'undefined') {
-      logger.log('Pi SDK script not loaded yet (window.Pi is undefined). Waiting...');
-      await new Promise<void>((resolve, reject) => {
-        let attempts = 0;
-        const interval = setInterval(() => {
-          if (typeof window.Pi !== 'undefined') {
-            clearInterval(interval);
-            logger.log(`Pi SDK script loaded after ~${attempts * 100}ms.`);
-            resolve();
-          } else {
-            attempts++;
-            if (attempts > 50) { // Wait for up to 5 seconds
-              clearInterval(interval);
-              reject(new Error('Pi SDK script did not load in time.'));
-            }
-          }
-        }, 100);
-      });
-    }
-
     try {
-      logger.log('Calling Pi.init({ version: "2.0", sandbox: true })...');
-      window.Pi.init({ version: "2.0", sandbox: true });
+      await this.waitForPiSdk();
+      logger.log(`Calling Pi.init({ version: "2.0", sandbox: ${PI_SANDBOX} })...`);
+      window.Pi.init({ version: "2.0", sandbox: PI_SANDBOX });
       logger.log('Pi.init() called successfully.');
     } catch (err) {
-      const errorMsg = `An error occurred during Pi.init(): ${err instanceof Error ? err.message : String(err)}`;
+      const errorMsg = `An error occurred during Pi SDK initialization: ${err instanceof Error ? err.message : String(err)}`;
       logger.log(`ERROR: ${errorMsg}`);
-      throw new Error(errorMsg);
+      throw new Error(errorMsg); // Re-throw to be caught in index.tsx
     }
   }
 
   public async authenticate(): Promise<UserDTO> {
     logger.log('authenticate() called.');
-    logger.log(`DUMMY_MODE is: ${DUMMY_MODE}`);
     
     if (DUMMY_MODE) {
         logger.log("Executing in DUMMY MODE.");
@@ -153,7 +150,7 @@ class PiService {
 
   public createPayment(paymentData: any, callbacks: any) {
     logger.log('createPayment() called.');
-    logger.log(`DUMMY_MODE is: ${DUMMY_MODE}`);
+
     if (DUMMY_MODE) {
         logger.log("Executing createPayment in DUMMY MODE.");
         const dummyPaymentId = `dummy_payment_${Date.now()}`;
@@ -179,8 +176,6 @@ class PiService {
                         cancelled: false,
                         user_cancelled: false,
                     },
-                    // Fix: Add transaction object to dummy data to match real SDK response
-                    // and allow dummy mode to function correctly.
                     transaction: {
                         txid: `dummy_txid_${Date.now()}`,
                     },

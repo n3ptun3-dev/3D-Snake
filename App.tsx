@@ -26,7 +26,7 @@ import { fetchLeaderboard } from './utils/leaderboard';
 import { getInitialConfig, fetchAndCacheGameConfig } from './utils/gameConfig';
 import { fetchApprovedAds, logAdClick, fetchPromoCodes } from './utils/sponsors';
 import { SpinnerIcon } from './components/icons';
-import { piService, DUMMY_MODE } from './utils/pi';
+import { piService } from './utils/pi';
 import { logger } from './utils/logger';
 
 const WALL_THICKNESS = (FULL_BOARD_WIDTH - BOARD_WIDTH) / 2;
