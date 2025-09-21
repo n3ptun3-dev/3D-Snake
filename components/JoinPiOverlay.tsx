@@ -1,5 +1,6 @@
 import React from 'react';
 import { XIcon } from './icons';
+import { piService } from '../utils/pi';
 
 interface JoinPiOverlayProps {
     onClose: () => void;
@@ -10,6 +11,11 @@ const JoinPiOverlay: React.FC<JoinPiOverlayProps> = ({ onClose, isRotated }) => 
     const containerClasses = isRotated
         ? 'h-full max-h-lg w-auto max-w-[90dvw]'
         : 'w-full max-w-lg max-h-[90dvh]';
+
+    const handleJoinClick = (e: React.MouseEvent) => {
+        e.preventDefault();
+        piService.openUrl('https://minepi.com/n3ptun3');
+    };
 
     return (
         <div
@@ -46,6 +52,7 @@ const JoinPiOverlay: React.FC<JoinPiOverlayProps> = ({ onClose, isRotated }) => 
                 <footer className="p-4 border-t border-neutral-700 flex-shrink-0">
                     <a
                         href="https://minepi.com/n3ptun3"
+                        onClick={handleJoinClick}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="block w-full text-center px-6 py-3 bg-yellow-500 hover:bg-yellow-600 text-black font-bold rounded-lg transition-colors text-lg"

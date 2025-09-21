@@ -76,9 +76,15 @@ export const FullScreenExitIcon: React.FC<{ className?: string }> = ({ className
     </svg>
 );
 
-export const RotateIcon: React.FC<{ className?: string }> = ({ className }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h5M4 18v-5h5m11 5v-5h-5m5-5V4h-5" />
+export const LandscapeIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5a1.5 1.5 0 011.5 1.5v6.75a1.5 1.5 0 01-1.5 1.5H3.75a1.5 1.5 0 01-1.5-1.5V8.25a1.5 1.5 0 011.5-1.5z" />
+    </svg>
+);
+
+export const PortraitIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 3.75h7.5a1.5 1.5 0 011.5 1.5v13.5a1.5 1.5 0 01-1.5 1.5h-7.5a1.5 1.5 0 01-1.5-1.5V5.25a1.5 1.5 0 011.5-1.5z" />
     </svg>
 );
 
@@ -154,7 +160,7 @@ export const SpeedIcon: React.FC<{ className?: string }> = ({ className }) => (
 
 export const PodiumIcon: React.FC<{ className?: string }> = ({ className }) => (
     <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21v-6a2 2 0 012-2h2a2 2 0 012 2v6m12 0v-6a2 2 0 00-2-2h-2a2 2 0 00-2 2v6M9 21V12a2 2 0 012-2h2a2 2 0 012 2v9" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2 21V17a2 2 0 012-2h2a2 2 0 012 2v4M9 21V14a2 2 0 012-2h2a2 2 0 012 2v7M16 21V11a2 2 0 012-2h2a2 2 0 012 2v10" />
     </svg>
 );
 

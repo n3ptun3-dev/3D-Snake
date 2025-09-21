@@ -5,7 +5,7 @@ import {
     PlayIcon, PauseIcon, FullScreenEnterIcon, FullScreenExitIcon,
     HeartIcon, SpeedIcon, PodiumIcon, CameraIcon, EyeIcon,
     SpeedBoostIcon, SlowDownIcon, MagnetIcon, ScoreDoublerIcon, TripleIcon, RadioIcon,
-    ChevronUpIcon, ChevronDownIcon, MegaphoneIcon, BurgerMenuIcon, RotateIcon
+    ChevronUpIcon, ChevronDownIcon, MegaphoneIcon, BurgerMenuIcon, LandscapeIcon, PortraitIcon
 } from './icons';
 import { GameState, ActiveEffect, FruitType, RadioStation, CameraView, UserDTO } from '../types';
 import { isMobile } from '../utils/device';
@@ -52,6 +52,11 @@ interface GameHUDProps {
     onToggleRotate: () => void;
     isSettingsOpen: boolean;
     isGameOverHudVisible: boolean;
+    onOpenLinkDevice: () => void;
+    onOpenEnterCode: () => void;
+    showMusicPulse: boolean;
+    showCameraPulse: boolean;
+    requestPiAuth: (intent: 'submit-score' | 'purchase-ad' | 'link-device', onSuccess: () => void, data?: any) => void;
 }
 
 const ControlButton: React.FC<{
@@ -62,7 +67,8 @@ const ControlButton: React.FC<{
   'aria-label': string;
   isDisabled?: boolean;
   className?: string;
-}> = ({ onClick, isToggled, onIcon, offIcon, 'aria-label': ariaLabel, isDisabled = false, className = '' }) => (
+  style?: React.CSSProperties;
+}> = ({ onClick, isToggled, onIcon, offIcon, 'aria-label': ariaLabel, isDisabled = false, className = '', style }) => (
     <button
         onClick={(e) => {
             if (isDisabled) return;
@@ -74,7 +80,8 @@ const ControlButton: React.FC<{
         aria-label={ariaLabel}
         aria-pressed={isToggled}
         disabled={isDisabled}
-        className={`rounded-full text-neutral-300 transition-all duration-200 flex items-center justify-center bg-white/10 hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black/50 focus:ring-cyan-400 ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:text-white'} ${className}`}
+        className={`rounded-full text-neutral-300 transition-all duration-400 ease-in-out flex items-center justify-center hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black/50 focus:ring-cyan-400 ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:text-white'} ${className}`}
+        style={style}
     >
         {isToggled ? offIcon : onIcon}
     </button>
@@ -164,13 +171,16 @@ const GameHUD: React.FC<GameHUDProps> = ({
     score, level, lives, gameSpeed, onStartGame, topSpeed, highScore, isWelcomePanelVisible, activeEffects,
     onOpenLeaderboard, onOpenSettings, onOpenGraphicsSettings, onOpenAmi, onOpenHowToPlay, musicSource, currentStation, flashMessage,
     cameraView, onCycleCamera, onToggleGameplayView, isHudContentVisible, setIsHudContentVisible, onResetToWelcome, onOpenFeedback,
-    onOpenJoinPi, onOpenAboutSpi, onOpenCredits, onOpenTerms, onOpenPrivacyPolicy, piUser,
-    isPiBrowser, isRotated, onToggleRotate, isSettingsOpen, isGameOverHudVisible
+    onOpenJoinPi, onOpenAboutSpi, onOpenCredits, onOpenTerms, onOpenPrivacyPolicy, piUser, requestPiAuth,
+    isPiBrowser, isRotated, onToggleRotate, isSettingsOpen, isGameOverHudVisible,
+    onOpenLinkDevice, onOpenEnterCode, showMusicPulse, showCameraPulse
 }) => {
     const [muteState, setMuteState] = useState(audioManager.getMuteState());
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [showCollapseButton, setShowCollapseButton] = useState(false);
     const [useSideLayout, setUseSideLayout] = useState(false);
+    const [isMusicPulsed, setIsMusicPulsed] = useState(false);
+    const [isCameraPulsed, setIsCameraPulsed] = useState(false);
 
     const isPlaying = gameState === 'Playing';
     const isWelcome = gameState === 'Welcome';
@@ -183,8 +193,31 @@ const GameHUD: React.FC<GameHUDProps> = ({
     }, []);
 
     useEffect(() => {
+      let intervalId: number | null = null;
+      if (showMusicPulse) {
+        intervalId = window.setInterval(() => {
+          setIsMusicPulsed(prev => !prev);
+        }, 400);
+      } else {
+        setIsMusicPulsed(false);
+      }
+      return () => { if (intervalId) clearInterval(intervalId); };
+    }, [showMusicPulse]);
+
+    useEffect(() => {
+      let intervalId: number | null = null;
+      if (showCameraPulse) {
+        intervalId = window.setInterval(() => {
+          setIsCameraPulsed(prev => !prev);
+        }, 400);
+      } else {
+        setIsCameraPulsed(false);
+      }
+      return () => { if (intervalId) clearInterval(intervalId); };
+    }, [showCameraPulse]);
+
+    useEffect(() => {
         const checkLayout = () => {
-            // Switch to side layout if the panel is expanded, the screen is in landscape, AND it's short.
             const isLandscape = window.innerWidth > window.innerHeight;
             const isShort = window.innerHeight < 240;
 
@@ -273,6 +306,14 @@ const GameHUD: React.FC<GameHUDProps> = ({
           {lives > 10 && <span className="text-sm ml-1">+{lives - 10}</span>}
       </div>
     );
+    
+    const musicPulseClass = showMusicPulse && isMusicPulsed
+        ? 'bg-green-500/30'
+        : 'bg-white/10';
+    
+    const cameraPulseClass = showCameraPulse && isCameraPulsed
+        ? 'bg-green-500/30'
+        : (cameraView === CameraView.THIRD_PERSON ? 'bg-cyan-500/30' : 'bg-white/10');
 
     return (
         <>
@@ -325,9 +366,9 @@ const GameHUD: React.FC<GameHUDProps> = ({
                            {!useSideLayout && (
                                 <>
                                     {isPiBrowser ? (
-                                        <ControlButton onClick={onToggleRotate} isToggled={isRotated} onIcon={<RotateIcon className="w-5 h-5" />} offIcon={<RotateIcon className="w-5 h-5" />} aria-label={isRotated ? "Rotate to Portrait" : "Rotate to Landscape"} className="w-10 h-10" />
+                                        <ControlButton onClick={onToggleRotate} isToggled={isRotated} onIcon={<LandscapeIcon className="w-5 h-5" />} offIcon={<PortraitIcon className="w-5 h-5" />} aria-label={isRotated ? "Rotate to Portrait" : "Rotate to Landscape"} className="w-10 h-10 bg-white/10" />
                                     ) : (
-                                        <ControlButton onClick={onToggleFullScreen} isToggled={isFullScreen} onIcon={<FullScreenEnterIcon className="w-5 h-5" />} offIcon={<FullScreenExitIcon className="w-5 h-5" />} aria-label={isFullScreen ? "Exit Fullscreen" : "Enter Fullscreen"} className="w-10 h-10" />
+                                        <ControlButton onClick={onToggleFullScreen} isToggled={isFullScreen} onIcon={<FullScreenEnterIcon className="w-5 h-5" />} offIcon={<FullScreenExitIcon className="w-5 h-5" />} aria-label={isFullScreen ? "Exit Fullscreen" : "Enter Fullscreen"} className="w-10 h-10 bg-white/10" />
                                     )}
                                     {(isPlaying || isPaused) && (
                                         <ControlButton 
@@ -336,7 +377,8 @@ const GameHUD: React.FC<GameHUDProps> = ({
                                             onIcon={<EyeIcon className="w-5 h-5" />} 
                                             offIcon={<EyeIcon className="w-5 h-5" />} 
                                             aria-label="Toggle Gameplay Camera"
-                                            className={`w-10 h-10 ${cameraView === CameraView.THIRD_PERSON ? 'bg-cyan-500/30' : ''}`}
+                                            className={`w-10 h-10 ${cameraPulseClass}`}
+                                            style={{ transform: showCameraPulse && isCameraPulsed ? 'scale(1.15)' : 'scale(1)' }}
                                         />
                                     )}
                                 </>
@@ -344,24 +386,33 @@ const GameHUD: React.FC<GameHUDProps> = ({
                            {(isPlaying && !isPaused) ? (
                                <div className="flex items-center justify-start gap-x-3 sm:gap-x-4 text-base sm:text-lg font-semibold">
                                    <div className="flex items-center gap-x-1 sm:gap-x-2"><span className="hidden sm:inline">Score:</span><span className="font-bold text-xl w-12 text-center">{score}</span></div>
-                                   <div className="hidden sm:flex items-center gap-x-1 sm:gap-x-2"><span>Level:</span><span className="font-bold text-xl w-8 text-center">{level}</span></div>
-                                   <div className="hidden sm:flex items-center gap-x-1.5"><LivesIndicator /></div>
+                                   <div className={`${isRotated ? 'hidden' : 'hidden sm:flex'} items-center gap-x-1 sm:gap-x-2`}><span>Level:</span><span className="font-bold text-xl w-8 text-center">{level}</span></div>
+                                   <div className={`${isRotated ? 'hidden' : 'hidden sm:flex'} items-center gap-x-1.5`}><LivesIndicator /></div>
                                </div>
                            ) : null}
                         </div>
                         
                         {/* Right side */}
                         <div className="flex items-center justify-end gap-x-1 sm:gap-x-2">
-                            <div className={`hidden sm:flex items-center bg-black/20 px-3 py-1.5 rounded-full transition-opacity duration-300 ${isPlaying && !isPaused ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} aria-label={`Current speed: ${speedMps} meters per second`}>
+                            <div className={`${isRotated ? 'hidden' : 'hidden sm:flex'} items-center bg-black/20 px-3 py-1.5 rounded-full transition-opacity duration-300 ${isPlaying && !isPaused ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} aria-label={`Current speed: ${speedMps} meters per second`}>
                                 <SpeedIcon className="w-5 h-5 mr-2 text-cyan-300" />
                                 <span className="font-semibold text-sm sm:text-base">{speedMps} m/s</span>
                             </div>
                             {!useSideLayout && (
                                 <div className="flex items-center gap-x-1 sm:gap-x-2">
-                                    <ControlButton onClick={() => audioManager.toggleSfxMute()} isToggled={muteState.areSfxMuted} onIcon={<SfxOnIcon className="w-5 h-5" />} offIcon={<SfxOffIcon className="w-5 h-5" />} aria-label={muteState.areSfxMuted ? "Unmute Sound Effects" : "Mute Sound Effects"} className="w-10 h-10" />
-                                    <ControlButton onClick={handleToggleMusic} isToggled={muteState.isMusicMuted} onIcon={<MusicOnIcon className="w-5 h-5" />} offIcon={<MusicOffIcon className="w-5 h-5" />} aria-label={muteState.isMusicMuted ? "Unmute Music" : "Mute Music"} className="w-10 h-10" />
-                                    {isExpanded && <ControlButton onClick={() => onOpenSettings()} onIcon={<RadioIcon className="w-5 h-5" />} offIcon={<RadioIcon className="w-5 h-5" />} aria-label="Open Radio Settings" className="w-10 h-10 flex-shrink-0" />}
-                                    <ControlButton onClick={onTogglePause} isToggled={isPaused} onIcon={<PauseIcon className="w-7 h-7" />} offIcon={<PlayIcon className="w-7 h-7" />} aria-label={isPaused ? "Resume Game" : "Pause Game"} isDisabled={!isPlaying && !isPaused} className={`w-12 h-12 text-cyan-300 border border-cyan-300/60 ${!isPlaying && !isPaused ? 'hidden' : ''}`} />
+                                    <ControlButton onClick={() => audioManager.toggleSfxMute()} isToggled={muteState.areSfxMuted} onIcon={<SfxOnIcon className="w-5 h-5" />} offIcon={<SfxOffIcon className="w-5 h-5" />} aria-label={muteState.areSfxMuted ? "Unmute Sound Effects" : "Mute Sound Effects"} className="w-10 h-10 bg-white/10" />
+                                    <ControlButton onClick={handleToggleMusic} isToggled={muteState.isMusicMuted} onIcon={<MusicOnIcon className="w-5 h-5" />} offIcon={<MusicOffIcon className="w-5 h-5" />} aria-label={muteState.isMusicMuted ? "Unmute Music" : "Mute Music"} className="w-10 h-10 bg-white/10" />
+                                    {isExpanded && (
+                                        <ControlButton 
+                                            onClick={onOpenSettings} 
+                                            onIcon={<RadioIcon className="w-5 h-5" />} 
+                                            offIcon={<RadioIcon className="w-5 h-5" />} 
+                                            aria-label="Open Radio Settings" 
+                                            className={`w-10 h-10 flex-shrink-0 ${musicPulseClass}`} 
+                                            style={{ transform: showMusicPulse && isMusicPulsed ? 'scale(1.15)' : 'scale(1)' }}
+                                        />
+                                    )}
+                                    <ControlButton onClick={onTogglePause} isToggled={isPaused} onIcon={<PauseIcon className="w-7 h-7" />} offIcon={<PlayIcon className="w-7 h-7" />} aria-label={isPaused ? "Resume Game" : "Pause Game"} isDisabled={!isPlaying && !isPaused} className={`w-12 h-12 text-cyan-300 border border-cyan-300/60 bg-white/10 ${!isPlaying && !isPaused ? 'hidden' : ''}`} />
                                 </div>
                             )}
                         </div>
@@ -369,7 +420,7 @@ const GameHUD: React.FC<GameHUDProps> = ({
                         {/* Centered Radio Info */}
                         {isExpanded && !useSideLayout && (musicSource === 'radio' || musicSource === 'saved') && currentStation && !muteState.isMusicMuted && (
                             <button
-                                onClick={() => onOpenSettings()}
+                                onClick={onOpenSettings}
                                 className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-2 min-w-0 max-w-[calc(100%-17rem)] p-2 rounded-full bg-black/20 hover:bg-black/60 transition-colors cursor-pointer"
                                 aria-label={`Now playing: ${currentStation.name}. Click to open music settings.`}
                             >
@@ -392,7 +443,7 @@ const GameHUD: React.FC<GameHUDProps> = ({
 
                 {/* Mobile-only stats row for active gameplay */}
                 {(isPlaying && !isPaused && !isPanelHidden) && (
-                    <div className="sm:hidden flex justify-around items-center w-full px-2 pb-2 -mt-2 text-white backdrop-blur-md rounded-b-xl border-b border-t border-white/10" style={glowStyle}>
+                    <div className={`${isRotated ? 'flex' : 'sm:hidden flex'} justify-around items-center w-full px-2 pb-2 -mt-2 text-white backdrop-blur-md rounded-b-xl border-b border-t border-white/10`} style={glowStyle}>
                         <div className="flex items-center gap-x-1 text-base font-semibold">
                             <span>Lv:</span><span className="font-bold text-lg w-8 text-center">{level}</span>
                         </div>
@@ -410,9 +461,9 @@ const GameHUD: React.FC<GameHUDProps> = ({
                 <>
                     <div className="absolute top-20 left-4 z-40 flex flex-col gap-2 items-start">
                         {isPiBrowser ? (
-                            <ControlButton onClick={onToggleRotate} isToggled={isRotated} onIcon={<RotateIcon className="w-5 h-5" />} offIcon={<RotateIcon className="w-5 h-5" />} aria-label={isRotated ? "Rotate to Portrait" : "Rotate to Landscape"} className="w-10 h-10" />
+                            <ControlButton onClick={onToggleRotate} isToggled={isRotated} onIcon={<LandscapeIcon className="w-5 h-5" />} offIcon={<PortraitIcon className="w-5 h-5" />} aria-label={isRotated ? "Rotate to Portrait" : "Rotate to Landscape"} className="w-10 h-10 bg-white/10" />
                         ) : (
-                           <ControlButton onClick={onToggleFullScreen} isToggled={isFullScreen} onIcon={<FullScreenEnterIcon className="w-5 h-5" />} offIcon={<FullScreenExitIcon className="w-5 h-5" />} aria-label={isFullScreen ? "Exit Fullscreen" : "Enter Fullscreen"} className="w-10 h-10" />
+                           <ControlButton onClick={onToggleFullScreen} isToggled={isFullScreen} onIcon={<FullScreenEnterIcon className="w-5 h-5" />} offIcon={<FullScreenExitIcon className="w-5 h-5" />} aria-label={isFullScreen ? "Exit Fullscreen" : "Enter Fullscreen"} className="w-10 h-10 bg-white/10" />
                         )}
                         {(isPlaying || isPaused) && (
                             <ControlButton 
@@ -421,14 +472,15 @@ const GameHUD: React.FC<GameHUDProps> = ({
                                 onIcon={<EyeIcon className="w-5 h-5" />} 
                                 offIcon={<EyeIcon className="w-5 h-5" />} 
                                 aria-label="Toggle Gameplay Camera"
-                                className={`w-10 h-10 ${cameraView === CameraView.THIRD_PERSON ? 'bg-cyan-500/30' : ''}`}
+                                className={`w-10 h-10 ${cameraPulseClass}`}
+                                style={{ transform: showCameraPulse && isCameraPulsed ? 'scale(1.15)' : 'scale(1)' }}
                             />
                         )}
                         {(isExpanded && !isPlaying) && (
                             <>
                                 {(musicSource === 'radio' || musicSource === 'saved') && currentStation && !muteState.isMusicMuted && (
                                     <button 
-                                        onClick={() => onOpenSettings()}
+                                        onClick={onOpenSettings}
                                         className="flex items-center gap-2 min-w-0 max-w-[120px] bg-black/50 hover:bg-black/70 transition-colors p-1 pr-2 rounded-full"
                                         aria-label={`Now playing: ${currentStation.name}. Click to open music settings.`}
                                     >
@@ -440,13 +492,20 @@ const GameHUD: React.FC<GameHUDProps> = ({
                         )}
                     </div>
                     <div className="absolute top-20 right-4 z-40 flex flex-col gap-2">
-                        <ControlButton onClick={() => audioManager.toggleSfxMute()} isToggled={muteState.areSfxMuted} onIcon={<SfxOnIcon className="w-5 h-5" />} offIcon={<SfxOffIcon className="w-5 h-5" />} aria-label={muteState.areSfxMuted ? "Unmute Sound Effects" : "Mute Sound Effects"} className="w-10 h-10" />
-                        <ControlButton onClick={handleToggleMusic} isToggled={muteState.isMusicMuted} onIcon={<MusicOnIcon className="w-5 h-5" />} offIcon={<MusicOffIcon className="w-5 h-5" />} aria-label={muteState.isMusicMuted ? "Unmute Music" : "Mute Music"} className="w-10 h-10" />
+                        <ControlButton onClick={() => audioManager.toggleSfxMute()} isToggled={muteState.areSfxMuted} onIcon={<SfxOnIcon className="w-5 h-5" />} offIcon={<SfxOffIcon className="w-5 h-5" />} aria-label={muteState.areSfxMuted ? "Unmute Sound Effects" : "Mute Sound Effects"} className="w-10 h-10 bg-white/10" />
+                        <ControlButton onClick={handleToggleMusic} isToggled={muteState.isMusicMuted} onIcon={<MusicOnIcon className="w-5 h-5" />} offIcon={<MusicOffIcon className="w-5 h-5" />} aria-label={muteState.isMusicMuted ? "Unmute Music" : "Mute Music"} className="w-10 h-10 bg-white/10" />
                         {(isExpanded && !isPlaying) && (
-                            <ControlButton onClick={() => onOpenSettings()} onIcon={<RadioIcon className="w-5 h-5" />} offIcon={<RadioIcon className="w-5 h-5" />} aria-label="Open Radio Settings" className="w-10 h-10 flex-shrink-0" />
+                            <ControlButton 
+                                onClick={onOpenSettings} 
+                                onIcon={<RadioIcon className="w-5 h-5" />} 
+                                offIcon={<RadioIcon className="w-5 h-5" />} 
+                                aria-label="Open Radio Settings" 
+                                className={`w-10 h-10 flex-shrink-0 ${musicPulseClass}`}
+                                style={{ transform: showMusicPulse && isMusicPulsed ? 'scale(1.15)' : 'scale(1)' }}
+                            />
                         )}
                         {(isPlaying || isPaused) && (
-                           <ControlButton onClick={onTogglePause} isToggled={isPaused} onIcon={<PauseIcon className="w-7 h-7" />} offIcon={<PlayIcon className="w-7 h-7" />} aria-label={isPaused ? "Resume Game" : "Pause Game"} isDisabled={!isPlaying && !isPaused} className={`w-12 h-12 text-cyan-300 border border-cyan-300/60`} />
+                           <ControlButton onClick={onTogglePause} isToggled={isPaused} onIcon={<PauseIcon className="w-7 h-7" />} offIcon={<PlayIcon className="w-7 h-7" />} aria-label={isPaused ? "Resume Game" : "Pause Game"} isDisabled={!isPlaying && !isPaused} className={`w-12 h-12 text-cyan-300 border border-cyan-300/60 bg-white/10`} />
                         )}
                     </div>
                 </>
@@ -479,7 +538,7 @@ const GameHUD: React.FC<GameHUDProps> = ({
             {/* Collapsed Radio Indicator */}
             {(isExpanded && !isHudContentVisible) && (musicSource === 'radio' || musicSource === 'saved') && currentStation && !muteState.isMusicMuted && (
                 <button
-                    onClick={() => onOpenSettings()}
+                    onClick={onOpenSettings}
                     className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 min-w-0 max-w-xs p-2 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-sm transition-colors cursor-pointer z-40"
                     aria-label={`Now playing: ${currentStation.name}. Click to open music settings.`}
                 >
@@ -524,6 +583,10 @@ const GameHUD: React.FC<GameHUDProps> = ({
                     onOpenPrivacyPolicy={onOpenPrivacyPolicy}
                     piUser={piUser}
                     isRotated={isRotated}
+                    isPiBrowser={isPiBrowser}
+                    onOpenLinkDevice={onOpenLinkDevice}
+                    onOpenEnterCode={onOpenEnterCode}
+                    requestPiAuth={requestPiAuth}
                 />
             )}
         </>

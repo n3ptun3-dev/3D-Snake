@@ -1,4 +1,4 @@
-# 3D Snake 🐍
+# 3D Snake: Neon Grid Runner 🐍
 
 [![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
 [![Three.js](https://img.shields.io/badge/Three.js-000000?style=for-the-badge&logo=three.js&logoColor=white)](https://threejs.org/)
@@ -7,19 +7,19 @@
 
 **The classic snake game, reimagined in a dynamic 3D world from the snake's first-person perspective.**
 
-![3D Snake Banner](https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/Snake%20banner.jpg)
+![3D Snake: Neon Grid Runner Banner](https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/Snake%20banner.jpg)
 
 ## 🎮 Play the Game
 
-Experience the thrill of 3D Snake live in your browser!
+Experience the thrill of 3D Snake: Neon Grid Runner live in your browser!
 
-**[➡️ Play Now!](https://your-live-url.com)** _(Replace with your game's URL)_
+**[➡️ Play Now!](https://d-snake-7a80a.web.app/)**
 
 ---
 
 ## ✨ Features
 
-3D Snake goes beyond the classic grid-based game, introducing a rich, interactive environment with numerous features:
+3D Snake: Neon Grid Runner goes beyond the classic grid-based game, introducing a rich, interactive environment with numerous features:
 
 *   **Immersive 3D Gameplay:** Navigate a neon-drenched cityscape from a first-person or dynamic third-person perspective.
 *   **Multiple Camera Views:** Switch between First Person, Orbit, and two cinematic Drone views to see the action from every angle.
@@ -53,30 +53,35 @@ This project is built with a modern, high-performance web stack:
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Getting Started Locally
 
-To run the project locally, follow these steps:
+To build and run the project on your local machine, follow these steps:
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/your-username/3d-snake.git
-    cd 3d-snake
-    ```
+1.  **Clone or Download the Project:**
+    Get the code onto your local machine.
 
-2.  **Install dependencies:**
+2.  **Install Dependencies:**
+    Navigate to the project root and run `npm install`. This command will also automatically run a setup script that copies and renames necessary files (like `build.mjs` and `.env` configs) from the `/local` directory to your project root.
     ```bash
     npm install
     ```
 
-3.  **Build the project:**
-    The project uses `esbuild` for a fast and simple build process.
-    ```bash
-    npm run build
-    ```
-    This command will compile the TypeScript/React code, process styles, and place all static assets into the `dist` directory.
+3.  **Configure Environment Variables:**
+    The setup script created `.env.testnet` and `.env.mainnet` files. Review them and add any missing values, especially for your Firebase project if you have one.
 
-4.  **Serve the application:**
-    There is no built-in development server. You can use any static file server to run the app locally. A simple option is the `serve` package.
+4.  **Build the Project:**
+    You can now build for either the testnet or mainnet environment.
+    ```bash
+    # For a testnet build
+    npm run build:testnet
+
+    # For a mainnet build
+    npm run build:mainnet
+    ```
+    This will create a production-ready build in the `/dist` directory.
+
+5.  **Serve the Built Application:**
+    Use any static file server to run the app from the `/dist` directory.
     ```bash
     # If you don't have serve installed: npm install -g serve
     serve -s dist
@@ -91,9 +96,10 @@ The codebase is organized to separate concerns, making it easier to navigate and
 
 ```
 .
-├── audio/            # All game sound effects and music loops
+├── backend/          # Node.js backend for Pi services (auth, payments)
 ├── components/       # Reusable React components (UI, overlays, 3D board)
-├── public/           # Static assets for the build output (index.html, etc.)
+├── local/            # Templates for local build files (.env, .gitignore, build script)
+├── audio/            # All game sound effects and music loops
 ├── utils/            # Helper functions and services (Pi SDK, leaderboard, game config)
 ├── App.tsx           # Main application component, handles game state and logic
 ├── constants.ts      # Game constants (colors, board size, etc.)

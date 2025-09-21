@@ -1,12 +1,15 @@
+
 {
   "name": "3d-snake-game",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm run build:testnet",
-    "build:testnet": "npx cross-env NODE_ENV=testnet node build.mjs",
-    "build:mainnet": "npx cross-env NODE_ENV=mainnet node build.mjs"
+    "postinstall": "node setup-local.mjs || exit 0",
+    "setup": "node setup-local.mjs",
+    "build:testnet": "cross-env APP_ENV=testnet PI_SANDBOX=true node build.mjs",
+    "build:mainnet": "cross-env APP_ENV=mainnet PI_SANDBOX=true node build.mjs",
+    "build:live": "cross-env APP_ENV=mainnet PI_SANDBOX=false node build.mjs"
   },
   "dependencies": {
     "firebase": "^10.12.2",

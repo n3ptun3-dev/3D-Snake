@@ -1,5 +1,6 @@
 import React from 'react';
 import { XIcon } from './icons';
+import { piService } from '../utils/pi';
 
 interface HowItWorksOverlayProps {
     onClose: () => void;
@@ -17,6 +18,11 @@ const HowItWorksOverlay: React.FC<HowItWorksOverlayProps> = ({ onClose, isRotate
     const containerClasses = isRotated
         ? 'h-full max-h-lg w-auto max-w-[90dvw]'
         : 'w-full max-w-lg max-h-[90dvh]';
+
+    const handleLinkClick = (e: React.MouseEvent, url: string) => {
+        e.preventDefault();
+        piService.openUrl(url);
+    };
 
     return (
         <div
@@ -52,7 +58,7 @@ const HowItWorksOverlay: React.FC<HowItWorksOverlayProps> = ({ onClose, isRotate
                         <p>You need a direct link to your image (e.g., one ending in <code className="bg-black/50 px-1 rounded">.png</code>, <code className="bg-black/50 px-1 rounded">.jpg</code>, <code className="bg-black/50 px-1 rounded">.gif</code>).</p>
                         <p><strong>Don't have an image link? No problem!</strong> We recommend using a free and easy tool to host your image.</p>
                         <ol className="list-decimal list-inside space-y-2 pl-2">
-                            <li>Go to <a href="https://imgbb.com" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline font-semibold">imgbb.com</a> and upload your image.</li>
+                            <li>Go to <a href="https://imgbb.com" onClick={(e) => handleLinkClick(e, "https://imgbb.com")} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline font-semibold">imgbb.com</a> and upload your image. No account required.</li>
                             <li>After uploading, find the "Embed codes" dropdown and select <strong>"HTML full linked"</strong>.</li>
                             <li>Copy the entire code snippet provided.</li>
                             <li><strong>Our form is smart!</strong> Just paste the full code you copied into our "Image URL" field, and we'll automatically extract the correct image link for you.</li>

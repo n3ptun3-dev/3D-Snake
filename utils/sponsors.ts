@@ -1,4 +1,5 @@
 import { AdType, AdSubmissionData, ApprovedAd, BookedSlots, PromoCode } from '../types';
+import { BACKEND_URL } from '../config';
 
 // --- ADVERTISING LOGIC ---
 
@@ -342,15 +343,37 @@ export const reportDisplayedAds = async (orderNumbers: string[]): Promise<void> 
     }
 };
 
-export const generatePaymentId = (title: string): string => {
-    const sanitizedTitle = title.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10).toUpperCase();
-    const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
-    return `${sanitizedTitle || 'AD'}-${randomSuffix}`;
+/**
+ * NEW: Creates a pending order in the backend (Google Sheet) and returns the paymentId.
+ * @param data The ad submission data.
+ * @returns The paymentId for the Pi transaction.
+ */
+export const createAdOrder = async (data: Omit<AdSubmissionData, 'paymentId'>): Promise<string> => {
+    try {
+        const response = await fetch(`${BACKEND_URL}/createOrder`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+
+        const responseData = await response.json();
+        if (!response.ok) {
+            throw new Error(responseData.error || 'Failed to create order on the server.');
+        }
+        
+        return responseData.paymentId;
+    } catch (error) {
+        console.error('Order creation failed:', error);
+        throw new Error('Could not create your ad order. Please try again.');
+    }
 };
 
-
-export const submitAd = async (data: AdSubmissionData): Promise<void> => {
-    const { adType } = data;
+/**
+ * Submits the final ad details to a Google Form for archival/notification purposes
+ * AFTER the payment has been successfully completed.
+ * @param data The complete and paid ad submission data.
+ */
+export const submitAdToArchive = async (data: AdSubmissionData): Promise<void> => {
     const formData = new FormData();
 
     formData.append(FORM_ENTRIES.paymentId, data.paymentId);
@@ -365,21 +388,18 @@ export const submitAd = async (data: AdSubmissionData): Promise<void> => {
     if(data.promoCode) {
         formData.append(FORM_ENTRIES.promoCode, data.promoCode);
     }
-
-
-    const adTypeValue = AD_TYPE_TO_FORM_VALUE[adType];
+    const adTypeValue = AD_TYPE_TO_FORM_VALUE[data.adType];
     formData.append(FORM_ENTRIES.type, adTypeValue);
     
     try {
         await fetch(FORM_URL, {
             method: 'POST',
             body: formData,
-            mode: 'no-cors', // We don't need to read the response from Google Forms.
+            mode: 'no-cors',
         });
-        // 'no-cors' requests will have an opaque response, so we can't check `response.ok`.
-        // We assume success if the request doesn't throw a network error.
     } catch (error) {
-        console.error('Ad submission to Google Form failed:', error);
-        throw new Error('Could not submit ad to Google Form.');
+        console.error('Ad submission to Google Form archive failed:', error);
+        // We don't throw an error here because the payment is already complete.
+        // This is a non-critical step.
     }
 };

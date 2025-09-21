@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AdType, Sponsor, AdSubmissionData, BookedSlots, ApprovedAd, GameConfig, PromoCode, UserDTO, PaymentDTO } from '../types';
-import { submitAd, generatePaymentId, logAdClick, fetchBookedSlots } from '../utils/sponsors';
+import { submitAdToArchive, createAdOrder, logAdClick, fetchBookedSlots } from '../utils/sponsors';
 import { XIcon, SpinnerIcon, MegaphoneIcon, CalendarIcon, CopyIcon, ChevronLeftIcon, ChevronRightIcon } from './icons';
 import HowItWorksOverlay from './HowItWorksOverlay';
+import RedirectingModal from './RedirectingModal';
 import { piService } from '../utils/pi';
 import { DUMMY_MODE, BACKEND_URL } from '../config';
 
@@ -12,7 +13,7 @@ interface AdvertisingOverlayProps {
   gameConfig: GameConfig | null;
   promoCodes: Map<string, PromoCode>;
   onOpenTerms: () => void;
-  requestPiAuth: (onSuccess: () => void) => void;
+  requestPiAuth: (intent: 'submit-score' | 'purchase-ad', onSuccess: () => void, data?: any) => void;
   piUser: UserDTO | null;
   isRotated: boolean;
 }
@@ -125,9 +126,13 @@ const generateFlyerDataUrl = (variant: number): string => {
 const SponsorDetailModal: React.FC<{ sponsor: Sponsor; onClose: () => void; isRotated: boolean; }> = ({ sponsor, onClose, isRotated }) => {
     const [isImagePopupOpen, setIsImagePopupOpen] = useState(false);
 
-    const handleVisitWebsite = () => {
+    const handleVisitWebsite = (e: React.MouseEvent) => {
         if (sponsor.websiteUrl && sponsor.websiteUrl !== '#') {
+            e.preventDefault();
             logAdClick('Website', sponsor.name);
+            piService.openUrl(sponsor.websiteUrl);
+        } else {
+            e.preventDefault();
         }
     };
     
@@ -156,7 +161,7 @@ const SponsorDetailModal: React.FC<{ sponsor: Sponsor; onClose: () => void; isRo
                     </div>
                     {sponsor.websiteUrl && sponsor.websiteUrl !== '#' && (
                         <footer className="p-4 border-t border-neutral-700 flex-shrink-0">
-                            <a href={sponsor.websiteUrl} target="_blank" rel="noopener noreferrer" onClick={handleVisitWebsite} className="block w-full text-center px-6 py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-lg transition-colors text-lg">
+                            <a href={sponsor.websiteUrl} onClick={handleVisitWebsite} target="_blank" rel="noopener noreferrer" className="block w-full text-center px-6 py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-lg transition-colors text-lg">
                                 Visit Website
                             </a>
                         </footer>
@@ -191,6 +196,7 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
     const [submissionData, setSubmissionData] = useState<AdSubmissionData | null>(null);
     const [selectedSponsor, setSelectedSponsor] = useState<Sponsor | null>(null);
     const [bookedSlots, setBookedSlots] = useState<BookedSlots>({});
+    const [isRedirecting, setIsRedirecting] = useState(false);
 
     useEffect(() => {
         const promoSeen = sessionStorage.getItem('promoSeen');
@@ -199,6 +205,22 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
             sessionStorage.setItem('promoSeen', 'true');
         }
     }, [gameConfig]);
+
+    useEffect(() => {
+        // Handle continuation of ad purchase from a linked device
+        const continuationData = sessionStorage.getItem('piAdContinuationData');
+        if (continuationData) {
+            try {
+                const parsedData = JSON.parse(continuationData) as AdSubmissionData;
+                setSubmissionData(parsedData);
+                setView('payment');
+            } catch (e) {
+                console.error("Failed to parse ad continuation data", e);
+            } finally {
+                sessionStorage.removeItem('piAdContinuationData');
+            }
+        }
+    }, []);
 
     useEffect(() => {
         if (view === 'list') {
@@ -283,94 +305,131 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
         setView('form');
     };
 
-    const handleFormSubmit = async (formData: Omit<AdSubmissionData, 'adType' | 'price' | 'scheduleDate' | 'paymentId' | 'originalPrice' | 'piUsername'>) => {
+    const handleFormSubmit = async (formData: Omit<AdSubmissionData, 'paymentId' | 'scheduleDate' | 'adType' | 'price' | 'originalPrice' | 'piUsername'>) => {
         if (!selectedType || selectedDates.length === 0 || !piUser || !gameConfig) return;
 
         setLoading(true);
         setFormCache(formData);
-        const paymentId = generatePaymentId(formData.title);
         
-        // --- Calculate bonus dates and final schedule ---
-        const findNextAvailableDate = (startDate: Date, adType: AdType, currentBookedSlots: BookedSlots, maxQuantity: number, quantityToAdd: number): Date => {
-            let currentDate = new Date(startDate);
-            while (true) {
-                currentDate.setUTCDate(currentDate.getUTCDate() + 1);
-                const dateString = currentDate.toISOString().slice(0, 10);
-                const slotsBooked = currentBookedSlots[dateString]?.[adType] || 0;
-                if (slotsBooked + quantityToAdd <= maxQuantity) {
-                    return currentDate;
+        try {
+            // --- Calculate bonus dates and final schedule ---
+            const findNextAvailableDate = (startDate: Date, adType: AdType, currentBookedSlots: BookedSlots, maxQuantity: number, quantityToAdd: number): Date => {
+                let currentDate = new Date(startDate);
+                while (true) {
+                    currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+                    const dateString = currentDate.toISOString().slice(0, 10);
+                    const slotsBooked = currentBookedSlots[dateString]?.[adType] || 0;
+                    if (slotsBooked + quantityToAdd <= maxQuantity) {
+                        return currentDate;
+                    }
+                }
+            };
+            const MAX_QUANTITY_PER_DAY: Record<AdType, number> = { Billboard: 1, Poster: 2, Banner: 22, Flyer: 22, CosmeticBanner: 0 };
+            const maxQuantity = MAX_QUANTITY_PER_DAY[selectedType];
+            
+            const promo = promoCodes.get(formData.promoCode?.toUpperCase() || '');
+            let bonusDates: string[] = [];
+            
+            if (promo && promo.isActive && promo.type === 'BOGO' && selectedDates.length > 0) {
+                const paidSlots = selectedDates.length * formData.quantity;
+                const freeSlots = paidSlots * promo.value;
+                const numFreeDays = Math.floor(freeSlots / formData.quantity);
+
+                const lastSelectedDate = new Date(selectedDates[selectedDates.length - 1] + 'T00:00:00Z');
+                let currentDate = lastSelectedDate;
+                const tempBookedSlots = JSON.parse(JSON.stringify(bookedSlots));
+                selectedDates.forEach(d => {
+                    if(!tempBookedSlots[d]) tempBookedSlots[d] = {};
+                    tempBookedSlots[d][selectedType] = (tempBookedSlots[d][selectedType] || 0) + formData.quantity;
+                });
+
+                for (let i = 0; i < numFreeDays; i++) {
+                    currentDate = findNextAvailableDate(currentDate, selectedType, tempBookedSlots, maxQuantity, formData.quantity);
+                    const dateString = currentDate.toISOString().slice(0, 10);
+                    bonusDates.push(dateString);
+                    if (!tempBookedSlots[dateString]) tempBookedSlots[dateString] = {};
+                    tempBookedSlots[dateString][selectedType] = (tempBookedSlots[dateString][selectedType] || 0) + formData.quantity;
                 }
             }
-        };
-        const MAX_QUANTITY_PER_DAY: Record<AdType, number> = { Billboard: 1, Poster: 2, Banner: 22, Flyer: 22, CosmeticBanner: 0 };
-        const maxQuantity = MAX_QUANTITY_PER_DAY[selectedType];
-        
-        const promo = promoCodes.get(formData.promoCode?.toUpperCase() || '');
-        let bonusDates: string[] = [];
-        
-        if (promo && promo.isActive && promo.type === 'BOGO' && selectedDates.length > 0) {
-            const paidSlots = selectedDates.length * formData.quantity;
-            const freeSlots = paidSlots * promo.value;
-            const numFreeDays = Math.floor(freeSlots / formData.quantity);
+            
+            const allDates = [...selectedDates, ...bonusDates].sort();
+            const scheduleDateString = allDates.join(',');
+            
+            // --- Calculate price ---
+            const pricePerUnit = getAdPrice(selectedType, gameConfig);
+            const basePrice = pricePerUnit * formData.quantity * selectedDates.length;
+            let finalPrice = basePrice;
+            let originalPrice: number | undefined = undefined;
 
-            const lastSelectedDate = new Date(selectedDates[selectedDates.length - 1] + 'T00:00:00Z');
-            let currentDate = lastSelectedDate;
-            const tempBookedSlots = JSON.parse(JSON.stringify(bookedSlots));
-            selectedDates.forEach(d => {
-                if(!tempBookedSlots[d]) tempBookedSlots[d] = {};
-                tempBookedSlots[d][selectedType] = (tempBookedSlots[d][selectedType] || 0) + formData.quantity;
-            });
-
-            for (let i = 0; i < numFreeDays; i++) {
-                currentDate = findNextAvailableDate(currentDate, selectedType, tempBookedSlots, maxQuantity, formData.quantity);
-                const dateString = currentDate.toISOString().slice(0, 10);
-                bonusDates.push(dateString);
-                if (!tempBookedSlots[dateString]) tempBookedSlots[dateString] = {};
-                tempBookedSlots[dateString][selectedType] = (tempBookedSlots[dateString][selectedType] || 0) + formData.quantity;
+            if (promo && promo.isActive) {
+                if (promo.type === 'DISC') {
+                    finalPrice = basePrice * (1 - (promo.value / 100));
+                    originalPrice = basePrice;
+                }
             }
-        }
-        
-        const allDates = [...selectedDates, ...bonusDates].sort();
-        const scheduleDateString = allDates.join(',');
-        
-        // --- Calculate price ---
-        const pricePerUnit = getAdPrice(selectedType, gameConfig);
-        const basePrice = pricePerUnit * formData.quantity * selectedDates.length;
-        let finalPrice = basePrice;
-        let originalPrice: number | undefined = undefined;
+            
+            const orderPayload = {
+                ...formData,
+                price: finalPrice,
+                originalPrice,
+                scheduleDate: scheduleDateString,
+                adType: selectedType,
+                piUsername: piUser.username,
+            };
 
-        if (promo && promo.isActive) {
-            if (promo.type === 'DISC') {
-                finalPrice = basePrice * (1 - (promo.value / 100));
-                originalPrice = basePrice;
+            const paymentId = await createAdOrder(orderPayload);
+            const finalData: AdSubmissionData = { ...orderPayload, paymentId };
+            
+            if (piService.isLinked()) {
+                const encodedData = btoa(JSON.stringify(finalData));
+                const deepLink = `pi://browser/d-snake-7a80a.web.app/continue-ad-purchase?data=${encodeURIComponent(encodedData)}`;
+                
+                setIsRedirecting(true);
+                setTimeout(() => {
+                    window.location.href = deepLink;
+                    setTimeout(() => setIsRedirecting(false), 5000);
+                }, 1000);
+                return;
             }
-            // For BOGO, finalPrice is basePrice, which is handled by default. The value is in the free dates.
-        }
-        
-        setLoading(false);
-        
-        const finalData: AdSubmissionData = {
-            ...formData,
-            paymentId,
-            price: finalPrice,
-            originalPrice,
-            scheduleDate: scheduleDateString,
-            adType: selectedType,
-            quantity: formData.quantity,
-            piUsername: piUser.username,
-        };
 
-        setSubmissionData(finalData);
-        setView('payment');
+            setSubmissionData(finalData);
+            setView('payment');
+
+        } catch (e) {
+            const message = e instanceof Error ? e.message : "An unknown error occurred during order creation.";
+            setError(message);
+        } finally {
+            setLoading(false);
+        }
     };
 
-    const handlePaymentConfirm = async (data: AdSubmissionData) => {
-        // The payment screen now handles the Pi transaction and backend confirmation.
-        // This function is called upon success.
-        setView('thank_you');
-        setTimeout(() => {
-            setView('list');
-        }, 5000);
+    const handleInitiatePayment = async (data: AdSubmissionData) => {
+        const paymentData = {
+            amount: data.price,
+            memo: data.paymentId, // <-- Use our ID in the memo
+            metadata: { 
+                title: data.title,
+                adType: data.adType,
+                dates: data.scheduleDate,
+            },
+        };
+
+        const callbacks = {
+            onReadyForServerApproval: (piPaymentId: string) => {}, // Logic now handled in pi.ts
+            onReadyForServerCompletion: async () => {
+                await submitAdToArchive(data);
+                setView('thank_you');
+            },
+            onCancel: (paymentId: string) => {
+                setError(`Payment was cancelled (ID: ${paymentId}).`);
+            },
+            onError: (error: Error, payment?: PaymentDTO) => {
+                setError(error.message || 'An unknown error occurred during payment.');
+                console.error('Pi Payment Error:', error, payment);
+            },
+        };
+        
+        piService.createPayment(paymentData, data.paymentId, callbacks);
     };
 
     const handlePaymentBack = () => {
@@ -401,7 +460,7 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
         };
 
         if (!piUser) {
-            requestPiAuth(proceed);
+            requestPiAuth('purchase-ad', proceed);
         } else {
             await proceed();
         }
@@ -414,6 +473,15 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
         }
         if (loading && view !== 'list') {
              return <div className="flex justify-center items-center h-full"><SpinnerIcon className="w-10 h-10 animate-spin text-cyan-400" /></div>
+        }
+        if (error) {
+            return (
+                <div className="p-6 text-center text-red-400">
+                    <p>An Error Occurred</p>
+                    <p className="text-sm mt-2">{error}</p>
+                    <button onClick={() => { setError(null); setView('list'); }} className="mt-4 px-4 py-2 bg-neutral-600 rounded-lg">Go Back</button>
+                </div>
+            );
         }
         switch (view) {
             case 'list':
@@ -428,9 +496,9 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
                 return <AdForm onSubmit={handleFormSubmit} onBack={() => setView('calendar')} adType={selectedType} selectedDates={selectedDates} initialData={formCache} promoCodes={promoCodes} onOpenTerms={onOpenTerms} bookedSlots={bookedSlots} piUser={piUser} gameConfig={gameConfig} />;
             case 'payment':
                 if (!submissionData) return null;
-                return <PaymentScreen data={submissionData} onConfirm={handlePaymentConfirm} onBack={handlePaymentBack} promoCodes={promoCodes} onOpenTerms={onOpenTerms} gameConfig={gameConfig} />;
+                return <PaymentScreen data={submissionData} onInitiatePayment={handleInitiatePayment} onBack={handlePaymentBack} promoCodes={promoCodes} onOpenTerms={onOpenTerms} gameConfig={gameConfig} />;
             case 'thank_you':
-                return <ThankYouScreen />;
+                return <ThankYouScreen onClose={() => setView('list')} />;
             default:
                 return null;
         }
@@ -449,8 +517,8 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
                     </h2>
                     <div className="flex items-center gap-2 sm:gap-4">
                         {view === 'list' && (
-                             <button onClick={handleAdvertiseClick} className="px-4 py-2 bg-green-700 hover:bg-green-800 text-white font-bold rounded-lg text-sm transition-transform transform hover:scale-105">
-                                Advertise With Us
+                             <button onClick={handleAdvertiseClick} className="text-center leading-tight px-4 py-2 bg-green-700 hover:bg-green-800 text-white font-bold rounded-lg text-sm transition-transform transform hover:scale-105">
+                                Advertise<br className="sm:hidden" /> With Us
                             </button>
                         )}
                         {(view === 'select_type' || view === 'calendar' || view === 'form') && (
@@ -488,6 +556,7 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
                 )}
 
                 {isHowItWorksOpen && <HowItWorksOverlay onClose={() => setIsHowItWorksOpen(false)} isRotated={isRotated} />}
+                {isRedirecting && <RedirectingModal isRotated={isRotated} />}
             </div>
         </div>
     );
@@ -1002,117 +1071,47 @@ const AdForm: React.FC<{
     );
 };
 
-const ThankYouScreen: React.FC = () => (
+const ThankYouScreen: React.FC<{ onClose: () => void }> = ({ onClose }) => (
     <div className="p-6 text-center flex flex-col items-center justify-center h-full">
         <h3 className="text-2xl font-bold text-green-400 mb-2">Thank You!</h3>
         <p className="text-neutral-300">Your submission has been received.</p>
         <p className="text-neutral-300 mt-2">It will be scheduled for display pending approval.</p>
-        <SpinnerIcon className="w-10 h-10 animate-spin text-cyan-400 mx-auto mt-6" />
-        <p className="mt-2 text-sm text-neutral-400">Returning to sponsor list...</p>
+        <button 
+            onClick={onClose} 
+            className="mt-6 px-6 py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-lg transition-colors"
+        >
+            Continue
+        </button>
     </div>
 );
 
 
 interface PaymentScreenProps {
   data: AdSubmissionData;
-  onConfirm: (data: AdSubmissionData) => Promise<void>;
+  onInitiatePayment: (data: AdSubmissionData) => Promise<void>;
   onBack: () => void;
   promoCodes: Map<string, PromoCode>;
   onOpenTerms: () => void;
   gameConfig: GameConfig;
 }
 
-const PaymentScreen: React.FC<PaymentScreenProps> = ({ data, onConfirm, onBack, promoCodes, onOpenTerms, gameConfig }) => {
+const PaymentScreen: React.FC<PaymentScreenProps> = ({ data, onInitiatePayment, onBack, promoCodes, onOpenTerms, gameConfig }) => {
     const [status, setStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
     const [error, setError] = useState<string | null>(null);
 
     const handlePayClick = async () => {
         setStatus('submitting');
         setError(null);
-    
         try {
-            await submitAd(data);
-    
-            const paymentData = {
-                amount: data.price,
-                memo: data.paymentId,
-                metadata: { 
-                    title: data.title,
-                    adType: data.adType,
-                    dates: data.scheduleDate,
-                },
-            };
-    
-            const callbacks = {
-                onReadyForServerApproval: async (paymentId: string) => {
-                    console.log('Pi Payment ready for server approval:', paymentId);
-                    try {
-                        const response = await fetch(`${BACKEND_URL}/approvePayment`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ paymentId }),
-                        });
-                        if (!response.ok) {
-                            const errorData = await response.json().catch(() => ({}));
-                            throw new Error(errorData.error || 'Backend approval failed.');
-                        }
-                        console.log('Backend successfully approved payment:', paymentId);
-                    } catch (err) {
-                        const errorMessage = err instanceof Error ? err.message : 'Unknown approval error.';
-                        console.error('Error in onReadyForServerApproval:', errorMessage);
-                        setError(`Could not approve payment. Please contact support. ID: ${paymentId}`);
-                        setStatus('error');
-                    }
-                },
-                onReadyForServerCompletion: async (payment: PaymentDTO) => {
-                    const paymentId = payment.identifier;
-                    const txid = payment.transaction?.txid;
-                    console.log('Pi Payment ready for server completion:', paymentId, txid);
-                    if (!txid) {
-                        setError(`Payment completion failed: Missing transaction ID (TXID).`);
-                        setStatus('error');
-                        return;
-                    }
-                    try {
-                        const response = await fetch(`${BACKEND_URL}/completePayment`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ paymentId, txid }),
-                        });
-
-                        if (!response.ok) {
-                            const errorData = await response.json().catch(() => ({}));
-                            throw new Error(errorData.error || 'Backend completion failed.');
-                        }
-                        console.log('Backend successfully completed payment:', paymentId);
-                        await onConfirm(data);
-                    } catch (err) {
-                        const errorMessage = err instanceof Error ? err.message : 'Unknown completion error.';
-                        console.error('Error in onReadyForServerCompletion:', errorMessage);
-                        setError(`Payment confirmation failed. Please contact support. ID: ${paymentId}. Error: ${errorMessage}`);
-                        setStatus('error');
-                    }
-                },
-                onCancel: (paymentId: string) => {
-                    setStatus('idle');
-                    setError(`Payment was cancelled (ID: ${paymentId}).`);
-                },
-                onError: (error: Error, payment?: PaymentDTO) => {
-                    setStatus('error');
-                    setError(error.message || 'An unknown error occurred during payment.');
-                    console.error('Pi Payment Error:', error, payment);
-                },
-            };
-            
-            piService.createPayment(paymentData, callbacks);
-    
+            await onInitiatePayment(data);
+            // The piService will handle callbacks, so we just wait here.
+            // If an error occurs in the callbacks, it will be set via the `error` state.
         } catch (e) {
             const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred.';
             setError(`Failed to prepare your ad for payment. Please try again. Error: ${errorMessage}`);
             setStatus('error');
         }
     };
-    
 
     const allDates = data.scheduleDate.split(',');
     const totalQuantity = data.quantity * allDates.length;

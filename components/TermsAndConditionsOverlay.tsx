@@ -41,11 +41,11 @@ const TermsAndConditionsOverlay: React.FC<TermsAndConditionsOverlayProps> = ({ o
                     <p className="text-neutral-400 text-sm">Last Updated: August 12, 2025</p>
 
                     <Section title="1. Acceptance of Terms">
-                        <p>Welcome to 3D Snake! These Terms and Conditions ("Terms") govern your use of our in-game advertising feature ("Service"). By purchasing and submitting an advertisement ("Ad"), you agree to be bound by these Terms. If you do not agree to these Terms, do not use the Service.</p>
+                        <p>Welcome to 3D Snake: Neon Grid Runner! These Terms and Conditions ("Terms") govern your use of our in-game advertising feature ("Service"). By purchasing and submitting an advertisement ("Ad"), you agree to be bound by these Terms. If you do not agree to these Terms, do not use the Service.</p>
                     </Section>
 
                     <Section title="2. The Advertising Service">
-                        <p>The Service allows you to pay for the display of an image and associated information (title, description, URL) within the 3D Snake game world on specific, pre-selected dates. This is a novelty feature intended for community engagement.</p>
+                        <p>The Service allows you to pay for the display of an image and associated information (title, description, URL) within the 3D Snake: Neon Grid Runner game world on specific, pre-selected dates. This is a novelty feature intended for community engagement.</p>
                         <p>This Service does not include user accounts, performance analytics (e.g., clicks, views), or detailed reporting. The service is provided "as is".</p>
                     </Section>
 
@@ -69,7 +69,7 @@ const TermsAndConditionsOverlay: React.FC<TermsAndConditionsOverlayProps> = ({ o
                     </Section>
                     
                     <Section title="5. Intellectual Property">
-                        <p>You retain ownership of the intellectual property rights in the content you submit. However, by submitting an Ad, you grant us a non-exclusive, worldwide, royalty-free, sublicensable license to use, reproduce, display, and distribute your Ad content within the 3D Snake game and in promotional materials for the game.</p>
+                        <p>You retain ownership of the intellectual property rights in the content you submit. However, by submitting an Ad, you grant us a non-exclusive, worldwide, royalty-free, sublicensable license to use, reproduce, display, and distribute your Ad content within the 3D Snake: Neon Grid Runner game and in promotional materials for the game.</p>
                     </Section>
 
                     <Section title="6. Limitation of Liability">

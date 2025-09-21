@@ -1,4 +1,3 @@
-
 import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle, useCallback } from 'react';
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -40,11 +39,13 @@ interface BoardProps {
   onCrashAnimationComplete: () => void;
   onGameOverAnimationComplete: () => void;
   nextSnake: Point3D[] | null;
+  isOrbitDragging: boolean;
 }
 
 export interface BoardRef {
   handleResize: () => void;
   triggerLightEvent: (type: LightEventType, data: LightEventData) => void;
+  handleOrbitDrag: (deltaX: number) => void;
 }
 
 // The layer number for the bloom effect.
@@ -634,7 +635,7 @@ const getFlyerAttachmentDetails = (flyer: FlyerDetails): { position: THREE.Vecto
 };
 
 
-const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, lastGameplayView, snakeSegments, snakeRotation, visualRotation, fruits, clearingFruits, gameSpeed, layoutDetails, isCrashing, isPaused, isPassageFruitActive, passageFruitLocation, approvedAds, billboardData, graphicsQuality, isPageVisible, weather, score, level, activeEffects, crashOutcome, onCrashAnimationComplete, onGameOverAnimationComplete, nextSnake }, ref) => {
+const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, lastGameplayView, snakeSegments, snakeRotation, visualRotation, fruits, clearingFruits, gameSpeed, layoutDetails, isCrashing, isPaused, isPassageFruitActive, passageFruitLocation, approvedAds, billboardData, graphicsQuality, isPageVisible, weather, score, level, activeEffects, crashOutcome, onCrashAnimationComplete, onGameOverAnimationComplete, nextSnake, isOrbitDragging }, ref) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const [isSceneInitialized, setIsSceneInitialized] = useState(false);
 
@@ -676,7 +677,8 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
     isPassageFruitActive: boolean;
     isCrashing: boolean;
     isPaused: boolean;
-    orbitStartTime?: number;
+    orbitAngle: number;
+    isOrbitDragging: boolean;
     startAnim?: {
         startTime: number;
         duration: number;
@@ -832,6 +834,8 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
     weather: 'Clear',
     score: 0,
     level: 1,
+    orbitAngle: 0,
+    isOrbitDragging: false,
   });
 
   const handleResize = useCallback(() => {
@@ -852,6 +856,11 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
     handleResize,
     triggerLightEvent: (type: LightEventType, data: LightEventData) => {
         animationRef.current.lightingSystem?.triggerEvent(type, data);
+    },
+    handleOrbitDrag: (deltaX: number) => {
+        if (animationRef.current) {
+            animationRef.current.orbitAngle += deltaX * 0.005;
+        }
     }
   }), [handleResize]);
   
@@ -872,6 +881,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
     state.weather = weather;
     state.score = score;
     state.level = level;
+    state.isOrbitDragging = isOrbitDragging;
 
     if (state.currentSnakeSegments !== snakeSegments || state.currentSnakeRotation !== snakeRotation) {
         state.prevSnakeSegments = state.isInitialRender ? snakeSegments : state.currentSnakeSegments;
@@ -881,7 +891,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
         state.lastTickTime = performance.now();
         if (state.isInitialRender) state.isInitialRender = false;
     }
-  }, [gameSpeed, cameraView, snakeSegments, snakeRotation, visualRotation, isCrashing, isPaused, fruits, clearingFruits, activeEffects, isPassageFruitActive, gameState, layoutDetails, graphicsQuality, weather, score, level]);
+  }, [gameSpeed, cameraView, snakeSegments, snakeRotation, visualRotation, isCrashing, isPaused, fruits, clearingFruits, activeEffects, isPassageFruitActive, gameState, layoutDetails, graphicsQuality, weather, score, level, isOrbitDragging]);
 
   useEffect(() => {
       const state = animationRef.current;
@@ -1545,7 +1555,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
     
                   if (t >= 1.0) {
                       animState.gameOverAnim = undefined;
-                      animState.orbitStartTime = undefined; // Reset orbit timer
+                      animState.orbitAngle = Math.atan2(gameOverAnim.endPos.z, gameOverAnim.endPos.x);
                       onGameOverAnimationComplete();
                   }
               } else if (startAnim && now > startAnim.startTime) {
@@ -1601,9 +1611,11 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
                     // before the start animation begins.
               }
               else if (cameraView === CameraView.ORBIT) {
-                  if (!animState.orbitStartTime) animState.orbitStartTime = now;
-                  const orbitElapsed = now - (animState.orbitStartTime || now);
-                  const angle = orbitElapsed * 0.0002;
+                  if (!animState.isOrbitDragging) {
+                    if (animState.orbitAngle === undefined) animState.orbitAngle = 0;
+                    animState.orbitAngle += 0.0025;
+                  }
+                  const angle = animState.orbitAngle || 0;
                   currentCamera.position.set(Math.cos(angle) * 18, 8, Math.sin(angle) * 18);
                   reusable.lookAtHelper.set(0, 2, 0);
                   currentCamera.lookAt(reusable.lookAtHelper);
@@ -2435,7 +2447,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
       roofMesh.position.y = height / 2;
       if (Math.random() < 0.5) { roofMesh.rotation.y = Math.PI / 2; }
     } buildingMesh.add(roofMesh); collectEdgeVertices(buildingMesh, buildingEdgeVertices); layoutGroup.add(buildingMesh); if(state.roofMeshes) { state.roofMeshes.push(roofMesh) }; return buildingMesh; };
-    const addTransmissionTower = (x: number, z: number) => { const towerGroup = new THREE.Group(); towerGroup.position.set(x + offsetX, 0.5, z + offsetZ); const materialIndex = Math.floor(Math.random() * wallMaterials.length); const randomMaterial = wallMaterials[materialIndex]; const baseHeight = 1; const baseGeo = new THREE.BoxGeometry(1, baseHeight, 1); state.geometriesToDispose.push(baseGeo); const base = new THREE.Mesh(baseGeo, randomMaterial); base.position.y = baseHeight / 2; const roofGeo = new THREE.PlaneGeometry(0.95, 0.95); state.geometriesToDispose.push(roofGeo); const roofMaterial = new THREE.MeshStandardMaterial({ color: buildingColors[materialIndex], roughness: 0.8, metalness: 0.1 }); state.materialsToDispose.push(roofMaterial); const roofMesh = new THREE.Mesh(roofGeo, roofMaterial); roofMesh.rotation.x = -Math.PI / 2; roofMesh.position.y = baseHeight / 2 + 0.01; base.add(roofMesh); if(state.roofMeshes) { state.roofMeshes.push(roofMesh) }; towerGroup.add(base); const coneHeight = 3; const coneGeo = new THREE.ConeGeometry(0.4, coneHeight, 8); state.geometriesToDispose.push(coneGeo); const cone = new THREE.Mesh(coneGeo, randomMaterial); cone.position.y = baseHeight + coneHeight / 2; towerGroup.add(cone); const lightColor = 0xff2222; const light = new THREE.PointLight(lightColor, 2, 3); light.position.y = baseHeight + coneHeight + 0.2; const lightMeshGeo = new THREE.SphereGeometry(0.05, 8, 8); state.geometriesToDispose.push(lightMeshGeo); const lightMeshMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: lightColor, emissiveIntensity: 1, toneMapped: false }); state.materialsToDispose.push(lightMeshMat); const lightMesh = new THREE.Mesh(lightMeshGeo, lightMeshMat); lightMesh.position.copy(light.position); lightMesh.layers.enable(BLOOM_LAYER); towerGroup.add(lightMesh); state.towerLights.push({ light, mesh: lightMesh }); towerGroup.add(light); collectEdgeVertices(base, buildingEdgeVertices); collectEdgeVertices(cone, buildingEdgeVertices); layoutGroup.add(towerGroup); return towerGroup; };
+    const addTransmissionTower = (x: number, z: number) => { const towerGroup = new THREE.Group(); towerGroup.position.set(x + offsetX, 0.5, z + offsetZ); const materialIndex = Math.floor(Math.random() * wallMaterials.length); const randomMaterial = wallMaterials[materialIndex]; const baseHeight = 1; const baseGeo = new THREE.BoxGeometry(1, baseHeight, 1); state.geometriesToDispose.push(baseGeo); const base = new THREE.Mesh(baseGeo, randomMaterial); base.position.y = baseHeight / 2; const roofGeo = new THREE.PlaneGeometry(0.95, 0.95); state.geometriesToDispose.push(roofGeo); const roofMaterial = new THREE.MeshStandardMaterial({ color: buildingColors[materialIndex], roughness: 0.8, metalness: 0.1 }); state.materialsToDispose.push(roofMaterial); const roofMesh = new THREE.Mesh(roofGeo, roofMaterial); roofMesh.rotation.x = -Math.PI / 2; roofMesh.position.y = baseHeight / 2 + 0.01; base.add(roofMesh); if(state.roofMeshes) { state.roofMeshes.push(roofMesh) }; towerGroup.add(base); const coneHeight = 4; const coneGeo = new THREE.ConeGeometry(0.4, coneHeight, 8); state.geometriesToDispose.push(coneGeo); const cone = new THREE.Mesh(coneGeo, randomMaterial); cone.position.y = baseHeight + coneHeight / 2; towerGroup.add(cone); const lightColor = 0xff2222; const light = new THREE.PointLight(lightColor, 2, 3); light.position.y = baseHeight + coneHeight + 0.2; const lightMeshGeo = new THREE.SphereGeometry(0.05, 8, 8); state.geometriesToDispose.push(lightMeshGeo); const lightMeshMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: lightColor, emissiveIntensity: 1, toneMapped: false }); state.materialsToDispose.push(lightMeshMat); const lightMesh = new THREE.Mesh(lightMeshGeo, lightMeshMat); lightMesh.position.copy(light.position); lightMesh.layers.enable(BLOOM_LAYER); towerGroup.add(lightMesh); state.towerLights.push({ light, mesh: lightMesh }); towerGroup.add(light); collectEdgeVertices(base, buildingEdgeVertices); collectEdgeVertices(cone, buildingEdgeVertices); layoutGroup.add(towerGroup); return towerGroup; };
     const addSkyscraper = (x: number, z: number, height: number, logoUrl: string) => { const buildingMesh = addBuildingColumn(x, z, height, 'flat'); const rooftopIcon = createQuantumRooftopIcon(state); rooftopIcon.position.y = height / 2; buildingMesh.add(rooftopIcon); state.rotatingIcons?.push(rooftopIcon); textureLoader.load(logoUrl, (texture) => { state.texturesToDispose.push(texture); const aspectRatio = texture.image.width / texture.image.height; const logoSize = 2.2; const logoWidth = aspectRatio >= 1 ? logoSize : logoSize * aspectRatio; const logoHeight = aspectRatio < 1 ? logoSize : logoSize / aspectRatio; const logoMaterial = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide }); state.materialsToDispose.push(logoMaterial); const logoGeometry = new THREE.PlaneGeometry(logoWidth, logoHeight); state.geometriesToDispose.push(logoGeometry); const logoMesh = new THREE.Mesh(logoGeometry, logoMaterial); logoMesh.position.y = height / 2 - logoHeight / 2 - 0.2; const offset = 0.51; if (x < WALL_THICKNESS) { logoMesh.position.x = offset; logoMesh.rotation.y = Math.PI / 2; } else if (x >= FULL_BOARD_WIDTH - WALL_THICKNESS) { logoMesh.position.x = -offset; logoMesh.rotation.y = -Math.PI / 2; } else if (z < WALL_THICKNESS) { logoMesh.position.z = offset; logoMesh.rotation.y = 0; } else { logoMesh.position.z = -offset; logoMesh.rotation.y = Math.PI; } buildingMesh.add(logoMesh); }); return buildingMesh; };
     const addSnakeTower = (x: number, z: number, height: number, logoUrl: string) => { const buildingMesh = addBuildingColumn(x, z, height, 'flat'); const helipadTexture = createHeliPadTexture(); state.texturesToDispose.push(helipadTexture); const helipadGeo = new THREE.CircleGeometry(0.4, 32); state.geometriesToDispose.push(helipadGeo); const helipadMat = new THREE.MeshStandardMaterial({ map: helipadTexture, roughness: 0.7 }); state.materialsToDispose.push(helipadMat); const helipadMesh = new THREE.Mesh(helipadGeo, helipadMat); helipadMesh.rotation.x = -Math.PI / 2; helipadMesh.position.y = height / 2 + 0.01; helipadMesh.receiveShadow = true; if(state.roofMeshes) state.roofMeshes.push(helipadMesh); buildingMesh.add(helipadMesh); const lightGeo = new THREE.SphereGeometry(0.03, 8, 8); state.geometriesToDispose.push(lightGeo); const lightColor = 0xff0000; const lightMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: lightColor, emissiveIntensity: 1.5, toneMapped: false }); state.materialsToDispose.push(lightMat); const lightPositions = [ new THREE.Vector3(0.42, 0, 0), new THREE.Vector3(-0.42, 0, 0), new THREE.Vector3(0, 0, 0.42), new THREE.Vector3(0, 0, -0.42), ]; lightPositions.forEach(pos => { const lightMesh = new THREE.Mesh(lightGeo, lightMat); lightMesh.position.copy(pos); lightMesh.position.y = height / 2 + 0.02; lightMesh.layers.enable(BLOOM_LAYER); buildingMesh.add(lightMesh); }); textureLoader.load(logoUrl, (texture) => { state.texturesToDispose.push(texture); const aspectRatio = texture.image.width / texture.image.height; const logoWidth = 0.95; const logoHeight = logoWidth / aspectRatio; const logoMaterial = new THREE.MeshBasicMaterial({ map: texture, transparent: true }); state.materialsToDispose.push(logoMaterial); const logoGeometry = new THREE.PlaneGeometry(logoWidth, logoHeight); state.geometriesToDispose.push(logoGeometry); const logoYPosition = height / 2 - logoHeight / 2 - 0.1; const offset = 0.51; const sides = [ { position: new THREE.Vector3(0, logoYPosition, offset), rotation: new THREE.Euler(0, 0, 0) }, { position: new THREE.Vector3(0, logoYPosition, -offset), rotation: new THREE.Euler(0, Math.PI, 0) }, { position: new THREE.Vector3(offset, logoYPosition, 0), rotation: new THREE.Euler(0, Math.PI / 2, 0) }, { position: new THREE.Vector3(-offset, logoYPosition, 0), rotation: new THREE.Euler(0, -Math.PI / 2, 0) } ]; sides.forEach(side => { const logoMesh = new THREE.Mesh(logoGeometry, logoMaterial); logoMesh.position.copy(side.position); logoMesh.rotation.copy(side.rotation); buildingMesh.add(logoMesh); }); }); return buildingMesh; };
     const addSearchlightTower = (x: number, z: number) => { const height = 4; const buildingMesh = addBuildingColumn(x, z, height, 'flat'); const searchlightBaseGroup = new THREE.Group(); searchlightBaseGroup.position.y = height / 2; buildingMesh.add(searchlightBaseGroup); const lightColor = 0xffffaa; const createBeam = (xOffset: number): THREE.Group => { const beamGroup = new THREE.Group(); beamGroup.position.x = xOffset; const beamHeight = 30; const beamGeo = new THREE.CylinderGeometry(0.01, 0.2, beamHeight, 8, 1, true); state.geometriesToDispose.push(beamGeo); const beamMat = new THREE.MeshBasicMaterial({ color: lightColor, transparent: true, opacity: 0.15, side: THREE.DoubleSide }); state.materialsToDispose.push(beamMat); const beam = new THREE.Mesh(beamGeo, beamMat); beam.position.y = beamHeight / 2; beamGroup.add(beam); const baseGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.2, 8); state.geometriesToDispose.push(baseGeo); const baseMat = new THREE.MeshStandardMaterial({color: '#444444'}); state.materialsToDispose.push(baseMat); const base = new THREE.Mesh(baseGeo, baseMat); base.position.y = 0.1; beamGroup.add(base); return beamGroup; }; const beam1 = createBeam(-0.2); const beam2 = createBeam(0.2); searchlightBaseGroup.add(beam1, beam2); state.searchlightBeams = [beam1, beam2]; state.searchlightTargets = []; const randomQuat = () => new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.random() * (Math.PI / 4), Math.random() * Math.PI * 2, 0, 'YXZ')); for (let i = 0; i < 2; i++) state.searchlightTargets.push({ currentRotation: randomQuat(), nextRotation: randomQuat(), startTime: 0, duration: 4000 + Math.random() * 3000, }); };
@@ -3012,7 +3024,7 @@ const Board = forwardRef<BoardRef, BoardProps>(({ gameState, zoom, cameraView, l
   return <div ref={mountRef} className="w-full h-full" />;
 });
 
-const chooseNextDroneAction = (animState: typeof Board.prototype.animationRef.current, startPos: THREE.Vector3, startQuat: THREE.Quaternion): DroneState => {
+function chooseNextDroneAction(animState: any, startPos: THREE.Vector3, startQuat: THREE.Quaternion): DroneState {
     const { bannerMeshes, snakeHead, layoutDetails, maxBuildingHeight, reusable, billboardScreen } = animState;
     if (!layoutDetails || !reusable) {
       const idleAction = { type: 'IDLE' } as DroneAction;

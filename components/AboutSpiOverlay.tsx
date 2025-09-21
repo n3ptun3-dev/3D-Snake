@@ -1,5 +1,6 @@
 import React from 'react';
 import { XIcon } from './icons';
+import { piService } from '../utils/pi';
 
 interface AboutSpiOverlayProps {
     onClose: () => void;
@@ -12,6 +13,11 @@ const AboutSpiOverlay: React.FC<AboutSpiOverlayProps> = ({ onClose, isRotated })
     const containerClasses = isRotated
         ? 'h-full max-h-lg w-auto max-w-[90dvw]'
         : 'w-full max-w-lg max-h-[90dvh]';
+
+    const handleLearnMoreClick = (e: React.MouseEvent) => {
+        e.preventDefault();
+        piService.openUrl('https://n3ptun3-dev.github.io/Spi-vs-Spi/');
+    };
 
     return (
         <div
@@ -47,6 +53,7 @@ const AboutSpiOverlay: React.FC<AboutSpiOverlayProps> = ({ onClose, isRotated })
                 <footer className="p-4 border-t border-neutral-700 flex-shrink-0">
                     <a
                         href="https://n3ptun3-dev.github.io/Spi-vs-Spi/"
+                        onClick={handleLearnMoreClick}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="block w-full text-center px-6 py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-lg transition-colors text-lg"

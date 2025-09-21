@@ -17,17 +17,22 @@ import CreditsOverlay from './components/CreditsOverlay';
 import TermsAndConditionsOverlay from './components/TermsAndConditionsOverlay';
 import PrivacyPolicyOverlay from './components/PrivacyPolicyOverlay';
 import PiAuthModal from './components/PiAuthModal';
+import NonPiBrowserModal from './components/NonPiBrowserModal';
+import LinkDeviceModal from './components/LinkDeviceModal';
+import EnterCodeModal from './components/EnterCodeModal';
 import { CameraView, Point3D, GameState, Fruit, FruitType, ActiveEffect, LayoutDetails, GameConfig, RadioStation, RadioBrowserStation, ApprovedAd, BillboardData, LeaderboardEntry, GraphicsQuality, PromoCode, UserDTO } from './types';
 import { BOARD_WIDTH, BOARD_DEPTH, FULL_BOARD_WIDTH, FULL_BOARD_DEPTH, FRUIT_CATEGORIES, VIEW_CYCLE } from './constants';
 import audioManager from './sounds';
 import { generateLayoutDetails, isWall, isPortalBlock, getPortalEmergence, getStreetPassageSpawnPoint, isValidSpawnLocation, getBoardSpawnPoint, isStreetPassageBlock, getPortalAbsolutePosition } from './components/gameLogic';
-import { isMobile, isPiBrowser as checkIsPiBrowser } from './utils/device';
+import { isMobile, confirmIsPiBrowser } from './utils/device';
 import { fetchLeaderboard } from './utils/leaderboard';
 import { getInitialConfig, fetchAndCacheGameConfig } from './utils/gameConfig';
 import { fetchApprovedAds, logAdClick, fetchPromoCodes } from './utils/sponsors';
 import { SpinnerIcon } from './components/icons';
 import { piService } from './utils/pi';
 import { logger } from './utils/logger';
+import { initFirebase } from './firebase';
+import { PI_SANDBOX, VERBOSE_LOGGING } from './config';
 
 const WALL_THICKNESS = (FULL_BOARD_WIDTH - BOARD_WIDTH) / 2;
 
@@ -100,6 +105,17 @@ const defaultSavedStations: RadioStation[] = [
     { name: 'Magic Party Mix', url: 'https://live.magicfm.ro/magic.party.mix', favicon: 'https://media.bauerradio.com/image/upload/c_crop,g_custom/v1606492636/brand_manager/stations/agepcxvlmp6fbmslx6tt.jpg' },
 ];
 
+// Extend the global Window interface for our pre-app logger
+declare global {
+    interface Window {
+        preAppLogger?: {
+            // FIX: Made the '_queue' property required to resolve conflict with other global declarations.
+            _queue: string[];
+            log: (source: string, ...args: any[]) => void;
+        };
+    }
+}
+
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>('Loading');
   const [gameConfig, setGameConfig] = useState<GameConfig | null>(null);
@@ -133,8 +149,9 @@ const App: React.FC = () => {
   const [activeEffects, setActiveEffects] = useState<ActiveEffect[]>([]);
   const [isLeaderboardOpen, setIsLeaderboardOpen] = useState(false);
   const [isSubmitScoreOpen, setIsSubmitScoreOpen] = useState(false);
-  const [submissionQualifiesForLeaderboard, setSubmissionQualifiesForLeaderboard] = useState(false);
+  const [submissionDetails, setSubmissionDetails] = useState<{ isNewHighScore: boolean; qualifiesForLeaderboard: boolean; } | null>(null);
   const [isHowToPlayOpen, setIsHowToPlayOpen] = useState(false);
+  const [showHowToPlayBackdrop, setShowHowToPlayBackdrop] = useState(true);
   const [isJoinPiOpen, setIsJoinPiOpen] = useState(false);
   const [isAboutSpiOpen, setIsAboutSpiOpen] = useState(false);
   const [isCreditsOpen, setIsCreditsOpen] = useState(false);
@@ -206,11 +223,24 @@ const App: React.FC = () => {
   const [isPiAuthModalOpen, setIsPiAuthModalOpen] = useState(false);
   const [onAuthSuccessCallback, setOnAuthSuccessCallback] = useState<(() => void) | null>(null);
   const [initialOverlayToShow, setInitialOverlayToShow] = useState<string | null>(null);
+  // FIX: Updated nonPiBrowserAction state to include 'link-device' intent and allow any data type to resolve the type conflict.
+  const [nonPiBrowserAction, setNonPiBrowserAction] = useState<{ intent: 'submit-score' | 'purchase-ad' | 'link-device'; data?: any } | null>(null);
   
   // Crash/Respawn/Game Over state
   const [crashOutcome, setCrashOutcome] = useState<'respawn' | 'gameOver' | null>(null);
   const [nextSnake, setNextSnake] = useState<Point3D[] | null>(null);
   const [isGameOverHudVisible, setIsGameOverHudVisible] = useState(false);
+
+  // NEW: State for linking modals
+  const [isLinkDeviceModalOpen, setIsLinkDeviceModalOpen] = useState(false);
+  const [isEnterCodeModalOpen, setIsEnterCodeModalOpen] = useState(false);
+
+  // NEW: State for UI pulse animations
+  const [showMusicPulse, setShowMusicPulse] = useState(false);
+  const [showCameraPulse, setShowCameraPulse] = useState(false);
+  
+  // NEW: State for interactive orbit view
+  const [isOrbitDragging, setIsOrbitDragging] = useState(false);
   
   const animationFrameRef = useRef<number | null>(null);
   const passageFruitRetryTimer = useRef<number | null>(null);
@@ -220,6 +250,9 @@ const App: React.FC = () => {
   const shouldGrow = useRef(0);
   const wasAutoPaused = useRef(false);
   const boardRef = useRef<BoardRef>(null);
+  const radioApiBaseUrlRef = useRef<string | null>(null);
+  const musicPulseTimerRef = useRef<number | null>(null);
+  const cameraPulseTimerRef = useRef<number | null>(null);
 
   const snakeRef = useRef(snake); snakeRef.current = snake;
   const fruitsRef = useRef(fruits); fruitsRef.current = fruits;
@@ -258,9 +291,13 @@ const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, [isRotated]);
 
-  const requestPiAuth = (onSuccess: () => void) => {
-    setOnAuthSuccessCallback(() => onSuccess);
-    setIsPiAuthModalOpen(true);
+  const requestPiAuth = (intent: 'submit-score' | 'purchase-ad' | 'link-device', onSuccess: () => void, data?: any) => {
+    if (isPiBrowser) {
+        setOnAuthSuccessCallback(() => onSuccess);
+        setIsPiAuthModalOpen(true);
+    } else {
+        setNonPiBrowserAction({ intent, data });
+    }
   };
   
   const handleRadioError = useCallback(() => {
@@ -275,6 +312,15 @@ const App: React.FC = () => {
   const handleGraphicsQualityChange = (quality: GraphicsQuality) => {
     setGraphicsQuality(quality);
     localStorage.setItem('snakeGraphicsQuality', quality);
+  };
+
+  const handleOpenSettings = () => {
+    if (musicPulseTimerRef.current) {
+        clearTimeout(musicPulseTimerRef.current);
+        musicPulseTimerRef.current = null;
+    }
+    setShowMusicPulse(false);
+    setIsSettingsOpen(true);
   };
 
   const handleLeaderboardUpdate = useCallback((allScores: LeaderboardEntry[]) => {
@@ -374,78 +420,177 @@ const App: React.FC = () => {
 
   // Main initialization effect
   useEffect(() => {
-    const isRunningInPiBrowser = checkIsPiBrowser();
-    setIsPiBrowser(isRunningInPiBrowser);
-
     const initApp = async () => {
-        console.log("Render start: Initializing app and fetching all data.");
+      // Step 1: Await the result of the environment check from index.html
+      const isRunningInPiBrowser = await confirmIsPiBrowser();
+      setIsPiBrowser(isRunningInPiBrowser);
+      piService.setIsPiBrowser(isRunningInPiBrowser);
+      
+      // After logger is initialized, handle logs from the pre-app logger queue
+      if (VERBOSE_LOGGING) {
+          if (window.preAppLogger?._queue && Array.isArray(window.preAppLogger._queue)) {
+              // Drain the queue and send to the main logger service
+              while(window.preAppLogger._queue.length > 0) {
+                  const logMsg = window.preAppLogger._queue.shift();
+                  if (logMsg) {
+                      logger.log(logMsg);
+                  }
+              }
+              // Redirect any subsequent pre-app logs directly to the main logger.
+              window.preAppLogger.log = (source, ...args) => {
+                  const message = args.map(String).join(' ');
+                  logger.log(`${source} ${message}`);
+              };
+          }
+      } else {
+          // If verbose logging is disabled, clear the queue and neuter the log function
+          // to prevent memory leaks from an ever-growing log array.
+          if (window.preAppLogger) {
+              window.preAppLogger._queue = [];
+              window.preAppLogger.log = () => {}; // No-op
+          }
+      }
 
-        // Handle direct navigation to "pages"
-        const path = window.location.pathname.toLowerCase();
-        if (path === '/terms') {
-            setInitialOverlayToShow('terms');
-            window.history.replaceState({}, document.title, '/');
-        } else if (path === '/credits') {
-            setInitialOverlayToShow('credits');
-            window.history.replaceState({}, document.title, '/');
-        } else if (path === '/about') {
-            setInitialOverlayToShow('about');
-            window.history.replaceState({}, document.title, '/');
-        } else if (path === '/privacy') {
-            setInitialOverlayToShow('privacy');
-            window.history.replaceState({}, document.title, '/');
+      // Pi SDK is now initialized in index.html to ensure the detection handshake works.
+      if (window.Pi) {
+          logger.log(`App confirmed Pi SDK is initialized. Sandbox mode from config: ${PI_SANDBOX}`);
+      }
+
+      // Step 2: Handle Service Worker registration
+      if (!isRunningInPiBrowser) {
+        if ('serviceWorker' in navigator) {
+          window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js')
+              .catch(err => {
+                logger.log(`Service Worker registration failed: ${err.message}`);
+              });
+          });
         }
+      }
+      
+      // Step 3: Proceed with the rest of the app initialization
+      logger.log("Render start: Initializing app and fetching all data.");
+      
+      const urlParams = new URLSearchParams(window.location.search);
+      const linkCode = urlParams.get('link');
+      const adData = urlParams.get('data');
+      const path = window.location.pathname.toLowerCase();
+      let deepLinkIntent: { intent: string; data?: any } | null = null;
+      
+      if (path.startsWith('/submit-score')) {
+          deepLinkIntent = {
+              intent: 'submit-score',
+              data: {
+                  score: parseInt(urlParams.get('score') || '0', 10),
+                  level: parseInt(urlParams.get('level') || '1', 10),
+                  topSpeed: parseFloat(urlParams.get('speed') || '0'),
+              }
+          };
+      } else if (path.startsWith('/start-ad-purchase') || path.startsWith('/continue-ad-purchase')) {
+          deepLinkIntent = { intent: 'purchase-ad' };
+      } else if (path === '/terms') {
+          setInitialOverlayToShow('terms');
+      } else if (path === '/credits') {
+          setInitialOverlayToShow('credits');
+      } else if (path === '/about') {
+          setInitialOverlayToShow('about');
+      } else if (path === '/privacy') {
+          setInitialOverlayToShow('privacy');
+      }
+      
+      await initFirebase();
+      audioManager.init();
 
-        // Fetch all necessary data concurrently during the loading screen.
-        const [config, ads, billboardDataResult, promos] = await Promise.all([
-            fetchAndCacheGameConfig(),
-            fetchApprovedAds(),
-            (async () => { // Wrap billboard fetch in an async function to handle errors
-                try {
-                    const [mobileScores, computerScores] = await Promise.all([
-                        fetchLeaderboard('mobile').catch(() => []),
-                        fetchLeaderboard('computer').catch(() => [])
-                    ]);
-                    const allScores = [...mobileScores, ...computerScores];
-                    
-                    const topScores = [...allScores].sort((a, b) => b.score - a.score).slice(0, 3);
-                    const topSpeeds = [...allScores].sort((a, b) => b.speed - a.speed).slice(0, 3);
+      const [config, ads, billboardDataResult, promos] = await Promise.all([
+          fetchAndCacheGameConfig(),
+          fetchApprovedAds(),
+          (async () => { // Wrap billboard fetch in an async function to handle errors
+              try {
+                  const [mobileScores, computerScores] = await Promise.all([
+                      fetchLeaderboard('mobile').catch(() => []),
+                      fetchLeaderboard('computer').catch(() => [])
+                  ]);
+                  const allScores = [...mobileScores, ...computerScores];
+                  const topScores = [...allScores].sort((a, b) => b.score - a.score).slice(0, 3);
+                  const topSpeeds = [...allScores].sort((a, b) => b.speed - a.speed).slice(0, 3);
+                  return { topScores, topSpeeds };
+              } catch (error) {
+                  logger.log(`Failed to fetch leaderboard data for billboard: ${(error as Error).message}`);
+                  return null;
+              }
+          })(),
+          fetchPromoCodes(),
+          audioManager.preloadAllSounds()
+      ]);
+      
+      audioManager.setAllowBackgroundPlay(localStorage.getItem('snake-background-play') === 'true');
+      
+      const effectiveConfig = config || getInitialConfig();
+      const layout = generateLayoutDetails();
+      
+      const initialSnake = createSnakeAtStart(effectiveConfig.initialSnakeLength);
+      const initialFruits = getInitialFruits(initialSnake, layout, effectiveConfig, 0);
 
-                    return { topScores, topSpeeds };
-                } catch (error) {
-                    console.error("Failed to fetch leaderboard data for billboard:", error);
-                    return null;
-                }
-            })(),
-            fetchPromoCodes(),
-            audioManager.preloadAllSounds()
-        ]);
-        
-        audioManager.setAllowBackgroundPlay(localStorage.getItem('snake-background-play') === 'true');
-        
-        const effectiveConfig = config || getInitialConfig();
-        const layout = generateLayoutDetails();
-        
-        const initialSnake = createSnakeAtStart(effectiveConfig.initialSnakeLength);
-        const initialFruits = getInitialFruits(initialSnake, layout, effectiveConfig, 0);
-
-        setApprovedAds(ads);
-        setBillboardData(billboardDataResult);
-        setPromoCodes(promos);
-        
-        setGameConfig(effectiveConfig);
-        setLayoutDetails(layout);
-        setSnake({ segments: initialSnake, rotation: 0 });
-        setFruits(initialFruits);
-        setLives(effectiveConfig.initialLives);
-        setBaseGameSpeed(effectiveConfig.initialGameSpeed);
-        setGameSpeed(effectiveConfig.initialGameSpeed);
-        setTopSpeed(1000 / effectiveConfig.initialGameSpeed);
-        setIsPassageFruitActive(initialFruits.some(f => FRUIT_CATEGORIES[f.type] === 'PASSAGE'));
-        setCameraView(CameraView.ORBIT);
-        
-        setGameState('Welcome');
-        console.log("Render end: App is ready.");
+      setApprovedAds(ads);
+      setBillboardData(billboardDataResult);
+      setPromoCodes(promos);
+      
+      setGameConfig(effectiveConfig);
+      setLayoutDetails(layout);
+      setSnake({ segments: initialSnake, rotation: 0 });
+      setFruits(initialFruits);
+      setLives(effectiveConfig.initialLives);
+      setBaseGameSpeed(effectiveConfig.initialGameSpeed);
+      setGameSpeed(effectiveConfig.initialGameSpeed);
+      setTopSpeed(1000 / effectiveConfig.initialGameSpeed);
+      setIsPassageFruitActive(initialFruits.some(f => FRUIT_CATEGORIES[f.type] === 'PASSAGE'));
+      setCameraView(CameraView.ORBIT);
+      
+      setGameState('Welcome');
+      logger.log("Render end: App is ready.");
+      
+      if (linkCode && !isRunningInPiBrowser) {
+        const validate = async () => {
+            try {
+                setFlashMessage("Linking account...");
+                await piService.validateLinkCode(linkCode);
+                setFlashMessage("Account linked successfully!");
+            } catch (e) {
+                const message = e instanceof Error ? e.message : "Failed to link account.";
+                setFlashMessage(message);
+            } finally {
+                window.history.replaceState({}, document.title, '/');
+            }
+        };
+        validate();
+      } else if (path.startsWith('/continue-ad-purchase') && adData) {
+        try {
+            const decodedData = JSON.parse(atob(decodeURIComponent(adData)));
+            sessionStorage.setItem('piAdContinuationData', JSON.stringify(decodedData));
+            setIsAmiOpen(true);
+            window.history.replaceState({}, document.title, '/');
+        } catch (e) {
+            logger.log(`Failed to decode ad continuation data: ${(e as Error).message}`);
+            setFlashMessage("Error continuing ad purchase.");
+        }
+      } else if (isRunningInPiBrowser && deepLinkIntent) {
+          const { intent, data } = deepLinkIntent;
+          setTimeout(() => {
+              requestPiAuth(intent as any, () => {
+                  if (intent === 'submit-score' && data) {
+                      setLastGameData(data);
+                      setSubmissionDetails({ isNewHighScore: false, qualifiesForLeaderboard: true });
+                      setIsSubmitScoreOpen(true);
+                  } else if (intent === 'purchase-ad') {
+                      setIsAmiOpen(true);
+                  }
+              }, data);
+          }, 500);
+      }
+      
+      if (path !== '/') {
+        window.history.replaceState({}, document.title, '/');
+      }
     };
 
     initApp();
@@ -470,6 +615,33 @@ const App: React.FC = () => {
       }
   }, [gameState]);
   
+  // Game state change handler for UI pulse animations
+  useEffect(() => {
+    // Clear any existing timers when gameState changes
+    if (musicPulseTimerRef.current) clearTimeout(musicPulseTimerRef.current);
+    if (cameraPulseTimerRef.current) clearTimeout(cameraPulseTimerRef.current);
+    setShowMusicPulse(false);
+    setShowCameraPulse(false);
+
+    if (gameState === 'Welcome') {
+        setShowMusicPulse(true);
+        musicPulseTimerRef.current = window.setTimeout(() => {
+            setShowMusicPulse(false);
+        }, 7000);
+    } else if (gameState === 'Playing') {
+        setShowCameraPulse(true);
+        cameraPulseTimerRef.current = window.setTimeout(() => {
+            setShowCameraPulse(false);
+        }, 5000);
+    }
+
+    // Cleanup timers on component unmount
+    return () => {
+        if (musicPulseTimerRef.current) clearTimeout(musicPulseTimerRef.current);
+        if (cameraPulseTimerRef.current) clearTimeout(cameraPulseTimerRef.current);
+    };
+  }, [gameState]);
+
   // Effect to handle opening initial overlays (from URL or first-time visit)
   useEffect(() => {
       if (gameState === 'Welcome' && isWelcomePanelVisible) {
@@ -498,6 +670,7 @@ const App: React.FC = () => {
               if (!hasSeenWelcome) {
                   // If it's the first visit, show the "How to Play" overlay after a delay.
                   const timer = setTimeout(() => {
+                      setShowHowToPlayBackdrop(false);
                       setIsHowToPlayOpen(true);
                   }, 2000); // 2 seconds after the welcome panel is visible
                   
@@ -553,39 +726,43 @@ const App: React.FC = () => {
     }
   }, [gameState, lastGameplayView]);
   
+  // Effect to handle score submission modal after a game ends.
   useEffect(() => {
     // This effect runs when the game is over and the final HUD is visible.
-    // It checks if a new local high score was set and decides which popup to show.
     if (gameState === 'GameOver' && lastGameData && isGameOverHudVisible) {
-      // A new local high score was set if the score from the completed game
-      // is equal to the currently stored high score (which would have just been updated).
-      // Also, don't show popups for a score of 0.
-      if (lastGameData.score === highScore && highScore > 0) {
-        
-        const checkAndShowPopup = async () => {
-          try {
-            const leaderboard = await fetchLeaderboard(isMobile() ? 'mobile' : 'computer');
-            const lowestScore = leaderboard.length > 0 ? leaderboard[leaderboard.length - 1].score : 0;
-            
-            // A score qualifies for the leaderboard if the board isn't full OR the score is higher than the lowest,
-            // AND the score is greater than 10.
-            const qualifies = (leaderboard.length < 100 || lastGameData.score > lowestScore) && lastGameData.score > 10;
-            
-            setSubmissionQualifiesForLeaderboard(qualifies);
+      // Don't show popups for a score of 0.
+      if (lastGameData.score <= 0) return;
 
-          } catch (error) {
-            console.error("Failed to fetch leaderboard for score check:", error);
-            // If the leaderboard check fails, we can't submit, so it doesn't qualify.
-            setSubmissionQualifiesForLeaderboard(false);
-          } finally {
-            // In any case of a new high score (qualifying or not), open the modal.
-            setIsSubmitScoreOpen(true);
+      const checkAndShowPopup = async () => {
+        try {
+          const isNewLocalHighScore = lastGameData.score === highScore;
+          
+          const leaderboard = await fetchLeaderboard(isMobile() ? 'mobile' : 'computer');
+          const lowestScore = leaderboard.length > 0 ? leaderboard[leaderboard.length - 1].score : 0;
+          
+          // A score qualifies if the board isn't full OR the score is higher than the lowest,
+          // AND the score is greater than 20.
+          const qualifiesForLeaderboard = (leaderboard.length < 100 || lastGameData.score > lowestScore) && lastGameData.score > 20;
+
+          // Open the modal if it's a new local high score OR it qualifies for the global leaderboard.
+          if (isNewLocalHighScore || qualifiesForLeaderboard) {
+              setSubmissionDetails({ isNewHighScore: isNewLocalHighScore, qualifiesForLeaderboard });
+              setIsSubmitScoreOpen(true);
           }
-        };
 
-        // Use a timeout to let the Game Over screen settle before showing the popup.
-        setTimeout(checkAndShowPopup, 2000);
-      }
+        } catch (error) {
+          logger.log(`Failed to fetch leaderboard for score check: ${(error as Error).message}`);
+          // If the leaderboard check fails, we can still show the local high score modal if applicable.
+          const isNewLocalHighScore = lastGameData.score === highScore;
+          if (isNewLocalHighScore) {
+              setSubmissionDetails({ isNewHighScore: true, qualifiesForLeaderboard: false });
+              setIsSubmitScoreOpen(true);
+          }
+        }
+      };
+
+      // Use a timeout to let the Game Over screen settle before showing the popup.
+      setTimeout(checkAndShowPopup, 2000);
     }
   }, [gameState, lastGameData, isGameOverHudVisible, highScore]);
 
@@ -865,6 +1042,12 @@ const App: React.FC = () => {
   }, [gameState, isPaused, isCrashing]);
 
   const handleToggleGameplayView = useCallback(() => {
+      if (cameraPulseTimerRef.current) {
+          clearTimeout(cameraPulseTimerRef.current);
+          cameraPulseTimerRef.current = null;
+      }
+      setShowCameraPulse(false);
+
       if (gameStateRef.current !== 'Playing' || isCrashingRef.current) return;
       setCameraView(prev => {
           const newView = prev === CameraView.FIRST_PERSON ? CameraView.THIRD_PERSON : CameraView.FIRST_PERSON;
@@ -885,29 +1068,47 @@ const App: React.FC = () => {
         setRadioError(null);
         setRadioStations([]);
 
-        const API_BASE_URL = 'https://de1.api.radio-browser.info/json';
         try {
-            const url = `https://de1.api.radio-browser.info/json/stations/byname/${encodeURIComponent(term)}?limit=50&hidebroken=true&order=clickcount&reverse=true`;
+            // Step 1: Discover a working server if we don't have one cached in the ref
+            if (!radioApiBaseUrlRef.current) {
+                const serverListResponse = await fetch('https://all.api.radio-browser.info/json/servers');
+                if (!serverListResponse.ok) throw new Error('Could not fetch radio server list.');
+                
+                const servers: { name: string }[] = await serverListResponse.json();
+                if (servers && servers.length > 0) {
+                    // Pick a random server and construct the base URL
+                    const randomServer = servers[Math.floor(Math.random() * servers.length)];
+                    const baseUrl = `https://${randomServer.name}/json`;
+                    logger.log(`Discovered and using radio API server: ${baseUrl}`);
+                    radioApiBaseUrlRef.current = baseUrl;
+                } else {
+                    throw new Error('No available radio servers found.');
+                }
+            }
+
+            // Step 2: Perform the search using the discovered server
+            const url = `${radioApiBaseUrlRef.current}/stations/byname/${encodeURIComponent(term)}?limit=50&hidebroken=true&order=clickcount&reverse=true`;
             const response = await fetch(url);
             if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
 
             const results: RadioBrowserStation[] = await response.json();
             if (!Array.isArray(results)) {
-                console.error("Unexpected API response:", results);
+                logger.log(`Unexpected radio API response: ${JSON.stringify(results)}`);
                 throw new Error("API did not return a valid list of stations.");
             }
             setRadioStations(results);
         } catch (err) {
-            console.error(err);
             const message = err instanceof Error ? err.message : 'An unknown error occurred.';
+            logger.log(`Could not fetch radio stations: ${message}`);
             setRadioError(`Could not fetch stations: ${message}`);
+            // If server discovery fails, clear the ref so we try again next time
+            radioApiBaseUrlRef.current = null;
         } finally {
             setIsRadioLoading(false);
         }
     }, []);
 
     const handleStationSelect = useCallback((station: RadioStation) => {
-        // console.log('Selected Radio Station Details:', JSON.stringify(station, null, 2));
         setCurrentStation(station);
         localStorage.setItem('snake-radio-station', JSON.stringify(station));
 
@@ -918,14 +1119,16 @@ const App: React.FC = () => {
     
     const handleMusicSourceChange = useCallback((source: 'default' | 'radio' | 'saved') => {
         setMusicSource(source);
-        if (source === 'radio' && !currentStation && radioStations.length === 0) {
+        // If switching to the 'radio' tab and the station list is empty,
+        // automatically perform a search to populate it for the user.
+        if (source === 'radio' && radioStations.length === 0) {
             const termToSearch = radioSearchTerm || 'hits';
             if (!radioSearchTerm) {
                 setRadioSearchTerm(termToSearch);
             }
             searchRadioStations(termToSearch);
         }
-    }, [currentStation, radioStations.length, searchRadioStations, radioSearchTerm]);
+    }, [radioStations.length, searchRadioStations, radioSearchTerm]);
     
     const handleToggleSaveStation = useCallback((station: RadioStation | null) => {
         if (!station) return;
@@ -938,6 +1141,11 @@ const App: React.FC = () => {
             }
         });
     }, []);
+  
+  const handleOpenHowToPlay = () => {
+    setShowHowToPlayBackdrop(true);
+    setIsHowToPlayOpen(true);
+  };
   
   useEffect(() => {
     if (gameState === 'Playing' && !isPaused && !isCrashing) {
@@ -1282,13 +1490,37 @@ const App: React.FC = () => {
   }, [gameState, handleTurn, isPaused, handleTogglePause, isCrashing]);
   
   const handlePointerDown = (e: React.PointerEvent<HTMLElement>) => {
+    const isOrbitInteractable = cameraView === CameraView.ORBIT && isExpanded && !isHudContentVisible;
+    if (isOrbitInteractable) {
+        setIsOrbitDragging(true);
+        pointerStartPos.current = { x: e.clientX, y: e.clientY };
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        e.preventDefault();
+        return;
+    }
+
     if (isPiBrowser || gameState !== 'Playing' || isPaused || isCrashing || (e.target as HTMLElement).closest('button')) return;
     pointerStartPos.current = { x: e.clientX, y: e.clientY };
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     e.preventDefault();
   };
 
+  const handlePointerMove = (e: React.PointerEvent<HTMLElement>) => {
+    if (isOrbitDragging && pointerStartPos.current) {
+        const deltaX = e.clientX - pointerStartPos.current.x;
+        boardRef.current?.handleOrbitDrag(deltaX);
+        pointerStartPos.current.x = e.clientX; // Update for next move event
+    }
+  };
+
   const handlePointerUp = (e: React.PointerEvent<HTMLElement>) => {
+    if (isOrbitDragging) {
+        setIsOrbitDragging(false);
+        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+        pointerStartPos.current = null;
+        return;
+    }
+
     if (isPiBrowser || !pointerStartPos.current || gameState !== 'Playing' || isPaused || isCrashing) return;
     (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     const deltaX = e.clientX - pointerStartPos.current.x;
@@ -1311,17 +1543,17 @@ const App: React.FC = () => {
     <main 
       ref={mainRef} tabIndex={-1}
       className={`relative bg-neutral-800 text-white overflow-hidden font-sans touch-none outline-none ${isRotated ? 'pi-browser-rotated' : 'h-screen w-screen'}`}
-      onPointerDown={handlePointerDown} onPointerUp={handlePointerUp}
+      onPointerDown={handlePointerDown} onPointerUp={handlePointerUp} onPointerMove={handlePointerMove}
     >
       <GameHUD
         gameState={gameState} isPaused={isPaused} onTogglePause={handleTogglePause} isFullScreen={isFullScreen} onToggleFullScreen={handleToggleFullScreen}
         score={score} level={level} lives={lives} gameSpeed={gameSpeed} onStartGame={handleStartGame}
         highScore={highScore} topSpeed={topSpeed} isWelcomePanelVisible={isWelcomePanelVisible}
         activeEffects={activeEffects} onOpenLeaderboard={() => setIsLeaderboardOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenSettings={handleOpenSettings}
         onOpenGraphicsSettings={() => setIsGraphicsSettingsOpen(true)}
         onOpenAmi={handleOpenAmi}
-        onOpenHowToPlay={() => setIsHowToPlayOpen(true)}
+        onOpenHowToPlay={handleOpenHowToPlay}
         musicSource={musicSource}
         currentStation={currentStation}
         flashMessage={flashMessage}
@@ -1343,6 +1575,11 @@ const App: React.FC = () => {
         onToggleRotate={handleToggleRotate}
         isSettingsOpen={isSettingsOpen}
         isGameOverHudVisible={isGameOverHudVisible}
+        onOpenLinkDevice={() => setIsLinkDeviceModalOpen(true)}
+        onOpenEnterCode={() => setIsEnterCodeModalOpen(true)}
+        showMusicPulse={showMusicPulse}
+        showCameraPulse={showCameraPulse}
+        requestPiAuth={requestPiAuth}
       />
       <div className="absolute inset-0 flex items-center justify-center">
         {layoutDetails && (
@@ -1367,6 +1604,7 @@ const App: React.FC = () => {
             nextSnake={nextSnake}
             lastGameplayView={lastGameplayView}
             clearingFruits={clearingFruits}
+            isOrbitDragging={isOrbitDragging}
           />
         )}
       </div>
@@ -1380,8 +1618,8 @@ const App: React.FC = () => {
       />
       {isAmiOpen && <AdvertisingOverlay onClose={() => setIsAmiOpen(false)} approvedAds={approvedAds} gameConfig={gameConfig} promoCodes={promoCodes} onOpenTerms={() => setIsTermsOpen(true)} requestPiAuth={requestPiAuth} piUser={piUser} isRotated={isRotated} />}
       {isLeaderboardOpen && <Leaderboard onClose={() => setIsLeaderboardOpen(false)} onLeaderboardUpdate={handleLeaderboardUpdate} isRotated={isRotated} />}
-      {isSubmitScoreOpen && lastGameData && <SubmitScore scoreData={lastGameData} onClose={() => setIsSubmitScoreOpen(false)} requestPiAuth={requestPiAuth} isRotated={isRotated} isForLeaderboard={submissionQualifiesForLeaderboard} />}
-      {isHowToPlayOpen && <HowToPlayOverlay onClose={() => setIsHowToPlayOpen(false)} isRotated={isRotated} />}
+      {isSubmitScoreOpen && lastGameData && submissionDetails && <SubmitScore scoreData={lastGameData} onClose={() => setIsSubmitScoreOpen(false)} requestPiAuth={requestPiAuth} isRotated={isRotated} submissionDetails={submissionDetails} />}
+      {isHowToPlayOpen && <HowToPlayOverlay onClose={() => setIsHowToPlayOpen(false)} isRotated={isRotated} showBackdrop={showHowToPlayBackdrop} />}
       {isFeedbackOpen && <FeedbackOverlay onClose={() => setIsFeedbackOpen(false)} isRotated={isRotated} />}
       {isJoinPiOpen && <JoinPiOverlay onClose={() => setIsJoinPiOpen(false)} isRotated={isRotated} />}
       {isAboutSpiOpen && <AboutSpiOverlay onClose={() => setIsAboutSpiOpen(false)} isRotated={isRotated} />}
@@ -1389,6 +1627,9 @@ const App: React.FC = () => {
       {isTermsOpen && <TermsAndConditionsOverlay onClose={() => setIsTermsOpen(false)} isRotated={isRotated} />}
       {isPrivacyPolicyOpen && <PrivacyPolicyOverlay onClose={() => setIsPrivacyPolicyOpen(false)} isRotated={isRotated} />}
       {isPiAuthModalOpen && <PiAuthModal onClose={() => setIsPiAuthModalOpen(false)} onSuccess={() => { setIsPiAuthModalOpen(false); onAuthSuccessCallback?.(); }} isRotated={isRotated} />}
+      {nonPiBrowserAction && <NonPiBrowserModal action={nonPiBrowserAction} onClose={() => setNonPiBrowserAction(null)} isRotated={isRotated} />}
+      {isLinkDeviceModalOpen && <LinkDeviceModal onClose={() => setIsLinkDeviceModalOpen(false)} isRotated={isRotated} />}
+      {isEnterCodeModalOpen && <EnterCodeModal onClose={() => setIsEnterCodeModalOpen(false)} onSuccess={() => { setIsEnterCodeModalOpen(false); setFlashMessage("Account linked!"); }} isRotated={isRotated} />}
       {isGraphicsSettingsOpen && (
           <GraphicsSettings 
               onClose={() => setIsGraphicsSettingsOpen(false)}

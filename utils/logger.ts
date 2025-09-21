@@ -1,16 +1,22 @@
+import { VERBOSE_LOGGING } from '../config';
 
 const GOOGLE_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSfYu2gGov8xS1zrq_k6lNX1DPqOHrmOlEPDO1V4iAa1UUQmCg/formResponse';
 const LOG_ENTRY_ID = 'entry.1607577330';
 
 class LoggerService {
   public log(message: string) {
-    const timestampedMessage = `[${new Date().toISOString()}] ${message}`;
+    if (!VERBOSE_LOGGING) {
+        return;
+    }
+
+    const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : 'N/A';
+    const finalMessage = `[UA: ${userAgent}] [${new Date().toISOString()}] ${message}`;
     
     // Log to console for local development visibility
-    console.log(timestampedMessage);
+    console.log(finalMessage);
 
     // Send to Google Form
-    this.sendToGoogleForm(timestampedMessage);
+    this.sendToGoogleForm(finalMessage);
   }
 
   private async sendToGoogleForm(message: string) {

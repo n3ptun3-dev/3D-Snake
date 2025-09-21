@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { FRUIT_COLORS } from '../constants';
 import { FruitType } from '../types';
 import {
@@ -9,6 +9,7 @@ import {
 interface HowToPlayOverlayProps {
     onClose: () => void;
     isRotated: boolean;
+    showBackdrop?: boolean;
 }
 
 const nodeData = [
@@ -56,7 +57,7 @@ const nodeData = [
     },
 ];
 
-const InfoItem: React.FC<{ title: string; description: string; children: React.ReactNode; }> = ({ title, description, children }) => (
+const InfoItem: React.FC<{ title: string; description: React.ReactNode; children: React.ReactNode; }> = ({ title, description, children }) => (
     <div className="bg-neutral-800/60 p-4 rounded-lg flex items-center gap-4">
         <div className="flex-shrink-0 flex items-center justify-center gap-1 bg-black/40 p-3 rounded-md">
             {children}
@@ -68,21 +69,45 @@ const InfoItem: React.FC<{ title: string; description: string; children: React.R
     </div>
 );
 
-const HowToPlayOverlay: React.FC<HowToPlayOverlayProps> = ({ onClose, isRotated }) => {
+const HowToPlayOverlay: React.FC<HowToPlayOverlayProps> = ({ onClose, isRotated, showBackdrop = true }) => {
+    const modalRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
+                onClose();
+            }
+        };
+
+        if (!showBackdrop) {
+            // Use a timeout to prevent the initial click from closing the modal
+            const timerId = setTimeout(() => {
+                document.addEventListener('mousedown', handleClickOutside);
+            }, 0);
+            return () => {
+                clearTimeout(timerId);
+                document.removeEventListener('mousedown', handleClickOutside);
+            };
+        }
+    }, [onClose, showBackdrop]);
+
     const containerClasses = isRotated
         ? 'h-full max-h-lg w-auto max-w-[90dvw]'
         : 'w-full max-w-lg max-h-[90dvh]';
+        
+    const backdropClass = showBackdrop ? "bg-black/80 backdrop-blur-md" : "bg-transparent pointer-events-none";
+    const modalClass = showBackdrop ? "" : "pointer-events-auto";
 
     return (
         <div
-            className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center font-sans p-4"
+            className={`fixed inset-0 z-50 flex items-center justify-center font-sans p-4 ${backdropClass}`}
             role="dialog"
             aria-modal="true"
             aria-labelledby="how-to-play-title"
         >
-            <div className={`bg-neutral-900/90 border border-neutral-700 rounded-2xl shadow-2xl flex flex-col ${containerClasses}`}>
+            <div ref={modalRef} className={`bg-neutral-900/90 border border-neutral-700 rounded-2xl shadow-2xl flex flex-col ${modalClass} ${containerClasses}`}>
                 <header className="flex items-center justify-between p-4 border-b border-neutral-700 flex-shrink-0">
-                    <h2 id="how-to-play-title" className="text-xl font-bold text-white">How to Play</h2>
+                    <h2 id="how-to-play-title" className="text-xl font-bold text-white">How to Play 3D Snake</h2>
                     <button
                         onClick={onClose}
                         className="p-2 rounded-full text-neutral-400 hover:bg-white/10 hover:text-white transition-colors"
@@ -96,7 +121,7 @@ const HowToPlayOverlay: React.FC<HowToPlayOverlayProps> = ({ onClose, isRotated 
                     <section>
                         <h3 className="text-lg font-bold text-cyan-300 mb-3">Interface Controls</h3>
                         <div className="space-y-3">
-                            <InfoItem title="Toggle View" description="Switch between first-person and third-person camera views during gameplay.">
+                            <InfoItem title="Toggle View" description={<>Switch between <strong>first-person</strong> and <strong>third-person</strong> camera views during gameplay.</>}>
                                 <EyeIcon className="w-8 h-8 text-cyan-400" />
                             </InfoItem>
                             <InfoItem title="Audio Settings" description="Toggle game music and sound effects, or open the settings to tune into live radio stations.">

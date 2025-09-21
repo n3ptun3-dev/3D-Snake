@@ -1,60 +1,74 @@
-import { logger } from './utils/logger';
-
-// --- Hardcoded Configuration ---
-// This file contains hardcoded values to ensure the application builds correctly
-// in environments like AI Studio where .env files are not accessible.
-
-// --- INSTRUCTIONS FOR MAINNET DEPLOYMENT ---
-// When you are ready to build for your production URL (Mainnet):
-// 1. Comment out the entire TESTNET CONFIGURATION block below.
-// 2. Uncomment the entire MAINNET CONFIGURATION block below.
-// 3. Fill in your actual Firebase mainnet credentials.
-// 4. Run `npm run build:mainnet` from your local machine.
-
-// --- TESTNET CONFIGURATION (for AI Studio & Dev Builds) ---
-export const PI_SANDBOX = true;
-export const BACKEND_URL = 'https://service-3d-snake-945566931016.us-west1.run.app/';
-export const DUMMY_MODE = false;
-export const FIREBASE_CONFIG = {
-  apiKey: "", // Not needed for testnet deployment from AI Studio
-  authDomain: "",
-  projectId: "d-snake-7a80a", // Can use a real project ID for basic analytics
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: "",
-  measurementId: ""
-};
-// --- END OF TESTNET CONFIGURATION ---
-
-
-/*
-// --- MAINNET CONFIGURATION (for Production Builds) ---
-export const PI_SANDBOX = false;
-export const BACKEND_URL = 'https://your-mainnet-backend-url.run.app/'; // <-- IMPORTANT: Update this to your production backend URL
-export const DUMMY_MODE = false;
-export const FIREBASE_CONFIG = {
-  apiKey: "YOUR_MAINNET_API_KEY", // <-- IMPORTANT: Fill in your Mainnet Firebase credentials
-  authDomain: "YOUR_MAINNET_AUTH_DOMAIN",
-  projectId: "YOUR_MAINNET_PROJECT_ID",
-  storageBucket: "YOUR_MAINNET_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MAINNET_MESSAGING_SENDER_ID",
-  appId: "YOUR_MAINNET_APP_ID",
-  measurementId: "YOUR_MAINNET_MEASUREMENT_ID"
-};
-// --- END OF MAINNET CONFIGURATION ---
-*/
-
-
-// --- Sanity Check & Logging for Debugging ---
-// This block will run when the app loads, logging the configuration
-// that was compiled into the application bundle.
-logger.log('--- Environment Configuration (from hardcoded values) ---');
-logger.log(`PI_SANDBOX: ${PI_SANDBOX}`);
-logger.log(`BACKEND_URL: '${BACKEND_URL}'`);
-logger.log(`DUMMY_MODE: ${DUMMY_MODE}`);
-logger.log(`Firebase Project ID: '${FIREBASE_CONFIG.projectId || 'Not Found'}'`);
-logger.log('---------------------------------');
-
-if (!DUMMY_MODE && !BACKEND_URL) {
-    logger.log('CRITICAL WARNING: BACKEND_URL is not set. Pi authentication and payment verification will fail.');
+// Add this to the global scope to inform TypeScript about our pre-app logger
+declare global {
+    interface Window {
+        preAppLogger?: {
+            _queue: string[];
+            log: (source: string, ...args: any[]) => void;
+        };
+        SNAKE_BUNDLE_PATH?: string;
+    }
 }
+
+/**
+ * Master switch for all application logging.
+ * Set to `true` to enable console logs and remote logging to the spreadsheet.
+ * Set to `false` for production to silence all logs.
+ */
+export const VERBOSE_LOGGING = false;
+
+const log = (...args: any[]) => {
+    // This function acts as a proxy to the pre-app logger defined in index.html.
+    // It ensures that logs from this critical config file are queued up and sent
+    // to the remote logger once the main application initializes.
+    if (window.preAppLogger) {
+        window.preAppLogger.log('[Config]', ...args);
+    } else {
+        // Fallback for environments where the pre-app logger might not exist (e.g. unit tests)
+        console.log('[Config]', ...args);
+    }
+};
+
+
+log('--- Executing config.ts v3.2 ---');
+
+// The build script will replace `process.env.APP_ENV` with a literal string: "mainnet" or "testnet".
+// This value is the single source of truth for the app's environment configuration.
+const buildEnv = process.env.APP_ENV || 'testnet';
+log(`Build environment detected: '${buildEnv}'`);
+
+// Set configuration based on the build environment
+const isMainnet = buildEnv === 'mainnet';
+
+let backendUrl: string;
+if (isMainnet) {
+    backendUrl = 'https://pi-auth-service-mainnet-945566931016.europe-west1.run.app';
+    log('Using MAINNET backend.');
+} else {
+    backendUrl = 'https://pi-auth-service-945566931016.europe-west1.run.app';
+    log('Using TESTNET backend.');
+}
+export const BACKEND_URL = backendUrl;
+
+
+// --- The rest of the config remains the same ---
+
+// PI_SANDBOX is injected by the build script based on the build command (e.g., `... --no-sandbox`).
+const piSandboxString = process.env.PI_SANDBOX || 'true';
+export const PI_SANDBOX = piSandboxString === 'true';
+log(`Final PI_SANDBOX value: ${PI_SANDBOX}`);
+
+
+// DUMMY_MODE is for local development outside of Pi Browser. Injected by the build script.
+const dummyModeString = process.env.DUMMY_MODE || 'false';
+export const DUMMY_MODE = dummyModeString === 'true';
+log(`Final DUMMY_MODE value: ${DUMMY_MODE}`);
+
+
+export const FIREBASE_CONFIG = {
+  apiKey: process.env.FIREBASE_API_KEY || "",
+  authDomain: process.env.FIREBASE_AUTH_DOMAIN || "",
+  projectId: process.env.FIREBASE_PROJECT_ID || "",
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET || "",
+  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || "",
+  appId: process.env.FIREBASE_APP_ID || "",
+};

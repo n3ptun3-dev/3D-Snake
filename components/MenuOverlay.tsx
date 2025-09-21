@@ -17,23 +17,60 @@ interface MenuOverlayProps {
     onOpenPrivacyPolicy: () => void;
     piUser: UserDTO | null;
     isRotated: boolean;
+    isPiBrowser: boolean;
+    onOpenLinkDevice: () => void;
+    onOpenEnterCode: () => void;
+    requestPiAuth: (intent: 'submit-score' | 'purchase-ad' | 'link-device', onSuccess: () => void, data?: any) => void;
 }
 
 const MenuOverlay: React.FC<MenuOverlayProps> = ({ 
     onClose, isPaused, onEndGame, onOpenHowToPlay, onOpenSettings, onOpenGraphicsSettings,
-    onOpenFeedback, onOpenJoinPi, onOpenAboutSpi, onOpenCredits, onOpenTerms, onOpenPrivacyPolicy, piUser, isRotated
+    onOpenFeedback, onOpenJoinPi, onOpenAboutSpi, onOpenCredits, onOpenTerms, onOpenPrivacyPolicy, piUser, isRotated,
+    isPiBrowser, onOpenLinkDevice, onOpenEnterCode, requestPiAuth
 }) => {
     const menuItems = [
+        { name: 'How to Play', action: () => { onOpenHowToPlay(); onClose(); } },
         { name: 'Graphics Settings', action: () => { onOpenGraphicsSettings(); onClose(); } },
         { name: 'Music Settings', action: () => { onOpenSettings(); onClose(); } },
-        { name: 'How to play', action: () => { onOpenHowToPlay(); onClose(); } },
+    ];
+    
+    // Dynamically insert the linking button
+    if (isPiBrowser) {
+        const handlePlayOnAnotherDevice = () => {
+            if (piUser) {
+                onOpenLinkDevice();
+                onClose();
+            } else {
+                requestPiAuth('link-device', () => {
+                    // This runs after successful auth
+                    onOpenLinkDevice();
+                    onClose(); 
+                });
+            }
+        };
+        menuItems.push({ name: 'Play on Another Device', action: handlePlayOnAnotherDevice });
+    } else { // Not in Pi Browser
+        menuItems.push({ name: piUser ? 'Account Linked ✅' : 'Link Account', action: () => { if (!piUser) { onOpenEnterCode(); onClose(); } } });
+    }
+
+    const commonMenuItems = [
         { name: 'Feedback', action: () => { onOpenFeedback(); onClose(); } },
         { name: 'About Spi vs Spi', action: () => { onOpenAboutSpi(); onClose(); } },
-        { name: 'Join Pi Network', action: () => { onOpenJoinPi(); onClose(); } },
+    ];
+    
+    // Conditionally add "Join Pi Network" if user is not in Pi Browser and not logged in.
+    if (!isPiBrowser && !piUser) {
+        commonMenuItems.push({ name: 'Join Pi Network', action: () => { onOpenJoinPi(); onClose(); } });
+    }
+
+    commonMenuItems.push(
         { name: 'Credits', action: () => { onOpenCredits(); onClose(); } },
         { name: 'Terms & Conditions', action: () => { onOpenTerms(); onClose(); } },
-        { name: 'Privacy Policy', action: () => { onOpenPrivacyPolicy(); onClose(); } },
-    ];
+        { name: 'Privacy Policy', action: () => { onOpenPrivacyPolicy(); onClose(); } }
+    );
+    
+    menuItems.push(...commonMenuItems);
+
 
     const containerClasses = isRotated
         ? 'h-full max-h-sm w-auto max-w-[90dvw]'
@@ -74,7 +111,8 @@ const MenuOverlay: React.FC<MenuOverlayProps> = ({
                             <li key={item.name}>
                                 <button
                                     onClick={item.action}
-                                    className="w-full text-left p-3 rounded-lg text-lg font-semibold text-neutral-200 hover:bg-white/10 transition-colors"
+                                    disabled={item.name === 'Account Linked ✅'}
+                                    className="w-full text-left p-3 rounded-lg text-lg font-semibold text-neutral-200 hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     {item.name}
                                 </button>

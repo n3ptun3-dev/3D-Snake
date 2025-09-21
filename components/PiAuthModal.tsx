@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { piService } from '../utils/pi';
 import { XIcon, SpinnerIcon } from './icons';
+// FIX: Corrected import path for config file from './config' to '../config'.
 import { DUMMY_MODE, PI_SANDBOX } from '../config';
 
 interface PiAuthModalProps {
@@ -20,7 +21,9 @@ const PiAuthModal: React.FC<PiAuthModalProps> = ({ onClose, onSuccess, isRotated
             await piService.authenticate();
             onSuccess();
         } catch (err: any) {
-            if (err && err.code === 'USER_CANCELLED') {
+            if (err.message === 'INCOMPLETE_PAYMENT_FOUND') {
+                setError("A previous pending payment was just resolved. Please click 'Authenticate' again to continue.");
+            } else if (err && err.code === 'USER_CANCELLED') {
                  setError('Authentication cancelled. Please authenticate to proceed.');
             } else {
                  setError(err instanceof Error ? err.message : 'Authentication failed. Please try again.');
@@ -35,13 +38,16 @@ const PiAuthModal: React.FC<PiAuthModalProps> = ({ onClose, onSuccess, isRotated
         ? 'h-auto max-h-sm w-auto max-w-[80vw]'
         : 'w-full max-w-sm';
         
+    const buildEnv = process.env.APP_ENV || 'testnet';
+    const envName = buildEnv.charAt(0).toUpperCase() + buildEnv.slice(1);
+
     const notice = DUMMY_MODE ? (
       <div className="my-4 p-3 bg-yellow-900/50 border border-yellow-500/50 rounded-lg text-yellow-300 text-sm">
         <strong>Developer Notice:</strong> This app is in DUMMY MODE for testing outside the Pi Browser. No real data is used.
       </div>
     ) : PI_SANDBOX ? (
       <div className="my-4 p-3 bg-blue-900/50 border border-blue-500/50 rounded-lg text-blue-300 text-sm">
-        <strong>Developer Notice:</strong> This app is connected to the Pi Testnet Sandbox. No real Pi will be used for transactions.
+        <strong>Developer Notice:</strong> This app is connected to the Pi {envName} Sandbox. No real Pi will be used for transactions.
       </div>
     ) : null;
 

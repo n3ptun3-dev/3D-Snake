@@ -1,5 +1,6 @@
 import React from 'react';
 import { XIcon } from './icons';
+import { piService } from '../utils/pi';
 
 interface CreditsOverlayProps {
     onClose: () => void;
@@ -17,6 +18,11 @@ const CreditsOverlay: React.FC<CreditsOverlayProps> = ({ onClose, isRotated }) =
     const containerClasses = isRotated
         ? 'h-full max-h-lg w-auto max-w-[90dvw]'
         : 'w-full max-w-lg max-h-[90dvh]';
+
+    const handleLinkClick = (e: React.MouseEvent, url: string) => {
+        e.preventDefault();
+        piService.openUrl(url);
+    };
 
     return (
         <div
@@ -43,6 +49,7 @@ const CreditsOverlay: React.FC<CreditsOverlayProps> = ({ onClose, isRotated }) =
                             <strong>Lead Developer & Visionary:</strong>{' '}
                             <a 
                                 href="https://profiles.pinet.com/profiles/n3ptun3" 
+                                onClick={(e) => handleLinkClick(e, 'https://profiles.pinet.com/profiles/n3ptun3')}
                                 target="_blank" 
                                 rel="noopener noreferrer" 
                                 className="text-yellow-400 hover:underline"

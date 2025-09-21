@@ -3,37 +3,195 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>3D Snake</title>
+    <title>3D Snake: Neon Grid Runner</title>
     <meta name="theme-color" content="#262626">
     
     <!-- SEO & Sharing Meta Tags -->
-    <meta name="description" content="The classic snake game, now in 3D and from the snake's point of view. Built with React and three.js." />
-    <meta name="keywords" content="snake, 3d snake, snake game, retro game, three.js, react, web game">
+    <meta name="description" content="3D Snake: Neon Grid Runner is the classic snake game, now in 3D and from the snake's point of view. Built with React and three.js." />
+    <meta name="keywords" content="snake, 3d snake, snake game, retro game, three.js, react, web game, neon grid runner">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐍</text></svg>">
     
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website">
-    <meta property="og:site_name" content="3D Snake">
-    <meta property="og:title" content="3D Snake">
-    <meta property="og:description" content="The classic snake game, now in 3D and from the snake's point of view. Built with React and three.js.">
+    <meta property="og:site_name" content="3D Snake: Neon Grid Runner">
+    <meta property="og:title" content="3D Snake: Neon Grid Runner">
+    <meta property="og:description" content="3D Snake: Neon Grid Runner is the classic snake game, now in 3D and from the snake's point of view. Built with React and three.js.">
     <meta property="og:image" content="https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/Snake%20banner.jpg">
     
     <!-- Twitter -->
     <meta property="twitter:card" content="summary_large_image">
-    <meta property="twitter:title" content="3D Snake">
-    <meta property="twitter:description" content="The classic snake game, now in 3D and from the snake's point of view. Built with React and three.js.">
+    <meta property="twitter:title" content="3D Snake: Neon Grid Runner">
+    <meta property="twitter:description" content="3D Snake: Neon Grid Runner is the classic snake game, now in 3D and from the snake's point of view. Built with React and three.js.">
     <meta property="twitter:image" content="https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/Snake%20banner.jpg">
+    
+    <script>
+      // --- UNIFIED PRE-APP LOGGER ---
+      // This is defined SYNCHRONOUSLY to prevent race conditions. It ensures the logger
+      // object exists before any other script (including the main app bundle) runs.
+      window.preAppLogger = {
+        _queue: [],
+        log: function(source, ...args) {
+          try {
+            const message = args.map(arg => {
+              if (arg instanceof Error) return `Error: ${arg.message} ${arg.stack || ''}`;
+              if (typeof arg === 'object' && arg !== null) {
+                  try { return JSON.stringify(arg); } catch { return '[Unserializable Object]'; }
+              }
+              return String(arg);
+            }).join(' ');
+            
+            this._queue.push(`${source} ${message}`);
+          } catch (e) {
+            // This is a last-resort fallback if logging itself fails.
+          }
+        }
+      };
+    </script>
     
     <!-- Tailwind Play CDN for AI Studio Preview -->
     <script src="https://cdn.tailwindcss.com"></script>
-
-    <!-- Stylesheet -->
-    <link rel="stylesheet" href="./styles.css" />
     
-    <!-- Pi Network SDK is now loaded statically -->
-    <script src="https://sdk.pi-network.dev/v2/pi-sdk.js" defer></script>
+    <script>
+      /* SNAKE_ENV_INJECTION_POINT */
+      (async () => {
+        // The logger object is already defined. We just create a helper function.
+        const log = (source, ...args) => window.preAppLogger.log(source, ...args);
+        const originalConsoleLog = console.log;
+        const originalConsoleWarn = console.warn;
+
+        // --- STEP 1: Pre-emptive Service Worker Unregister ---
+        if ('serviceWorker' in navigator && sessionStorage.getItem('sw-unregistered-for-pi-check') !== 'true') {
+          try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            if (registrations.length > 0) {
+              log('[Pi Check]', 'Active SW found. Unregistering and reloading for a clean SDK environment.');
+              sessionStorage.setItem('sw-unregistered-for-pi-check', 'true');
+              await Promise.all(registrations.map(r => r.unregister()));
+              window.location.reload();
+              return; // Stop execution to allow page to reload
+            }
+          } catch (e) {
+            log('[Pi Check]', 'Error during SW check, proceeding anyway:', e);
+          }
+          sessionStorage.setItem('sw-unregistered-for-pi-check', 'true');
+        }
+        
+        // This promise is exposed globally so the main app can await its result.
+        window.__piBrowserCheckPromise = new Promise((resolve) => {
+          const timeout = 3000;
+          let timer;
+          let resolved = false;
+
+          const cleanupAndLoadApp = (result) => {
+            if (resolved) return;
+            resolved = true;
+            
+            window.removeEventListener('message', messageHandler);
+            console.log = originalConsoleLog;
+            console.warn = originalConsoleWarn;
+            clearTimeout(timer);
+            
+            log('[Pi Check]', `Final result: ${result}. Loading application...`);
+
+            try {
+                const appScript = document.createElement('script');
+                appScript.type = 'module';
+                // Use the globally injected filename from the build script, or fall back for safety.
+                appScript.src = window.SNAKE_BUNDLE_PATH || '/bundle.js';
+                document.body.appendChild(appScript);
+            } catch (e) {
+                log('[Pi Check]', 'CRITICAL: Failed to inject main app bundle script:', e);
+            }
+            
+            resolve(result);
+          };
+
+          const messageHandler = (event) => {
+            // Create a detailed log object for better debugging
+            const logData = {
+                message: 'Received window.message event',
+                origin: event.origin,
+                data: event.data,
+                type: event.type,
+                lastEventId: event.lastEventId,
+                isTrusted: event.isTrusted,
+                hasSource: !!event.source,
+            };
+            log('[Pi Check]', 'Detailed message event:', logData);
+            
+            try {
+                if (event.origin && event.origin.includes('minepi.com')) {
+                    cleanupAndLoadApp(true);
+                }
+            } catch (e) { /* Silently ignore errors */ }
+          };
+          window.addEventListener('message', messageHandler);
+
+          console.log = function(...args) {
+            log('[Intercept Log]', ...args);
+            originalConsoleLog.apply(console, args);
+            try {
+                const fullLogMessage = args.map(arg => (typeof arg === 'object' && arg !== null) ? JSON.stringify(arg) : String(arg)).join(' ');
+                if (fullLogMessage.includes('minepi.com') || fullLogMessage.includes('@pi:')) {
+                    cleanupAndLoadApp(true);
+                }
+            } catch(e) { /* Silently ignore errors */ }
+          };
+          
+          console.warn = function(...args) {
+            log('[Intercept Warn]', ...args);
+            originalConsoleWarn.apply(console, args);
+          };
+          
+          timer = setTimeout(() => {
+            const userAgent = navigator.userAgent || '';
+            log('[Pi Check]', `Initial Pi check timed out. User-Agent for fallback check: ${userAgent}`);
+
+            const isLikelyPiBrowser = (userAgent.includes('; wv)') || userAgent.includes('Version/4.0')) && !userAgent.includes('SamsungBrowser');
+
+            if (isLikelyPiBrowser) {
+                log('[Pi Check]', 'User-Agent fallback SUCCEEDED. Assuming Pi Browser environment.');
+                cleanupAndLoadApp(true);
+            } else {
+                log('[Pi Check]', 'User-Agent fallback FAILED. Assuming standard browser.');
+                cleanupAndLoadApp(false);
+            }
+          }, timeout);
+
+          try {
+              const script = document.createElement('script');
+              script.src = 'https://sdk.minepi.com/pi-sdk.js';
+              script.async = true;
+              script.onload = () => {
+                if (window.Pi && typeof window.Pi.init === 'function') {
+                  // This value is now dynamically replaced by the build script.
+                  const isSandbox = true;
+                  log('[Pi Check]', `Pi SDK script loaded. Initializing with sandbox: ${isSandbox}`);
+                  try {
+                      window.Pi.init({ version: "2.0", sandbox: isSandbox });
+                  } catch (e) {
+                      log('[Pi Check]', 'Error during Pi.init:', e);
+                  }
+                } else {
+                  log('[Pi Check]', 'Pi SDK script loaded, but window.Pi.init not found.');
+                }
+              };
+              script.onerror = (e) => {
+                log('[Pi Check]', 'CRITICAL: Failed to load pi-sdk.js script.', e);
+              };
+              document.head.appendChild(script);
+          } catch (e) {
+              log('[Pi Check]', 'Error injecting Pi SDK script:', e);
+          }
+        });
+      })();
+    </script>
     
 <style>
+  @tailwind base;
+  @tailwind components;
+  @tailwind utilities;
+
   html, body {
     margin: 0;
     padding: 0;
@@ -60,17 +218,24 @@
     "react": "https://aistudiocdn.com/react@^19.1.1",
     "three/": "https://aistudiocdn.com/three@^0.180.0/",
     "three": "https://aistudiocdn.com/three@^0.180.0",
-    "firebase/": "https://aistudiocdn.com/firebase@^12.2.1/"
+    "firebase/": "https://aistudiocdn.com/firebase@^12.2.1/",
+    "cors": "https://aistudiocdn.com/cors@^2.8.5",
+    "express": "https://aistudiocdn.com/express@^5.1.0",
+    "crypto": "https://aistudiocdn.com/crypto@^1.0.1",
+    "google-auth-library": "https://aistudiocdn.com/google-auth-library@^10.3.0",
+    "google-spreadsheet": "https://aistudiocdn.com/google-spreadsheet@^5.0.2",
+    "path": "https://aistudiocdn.com/path@^0.12.7",
+    "url": "https://aistudiocdn.com/url@^0.11.4"
   }
 }
 </script>
+
 <link rel="stylesheet" href="/index.css">
 </head>
   <body style="background-color: #262626;">
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
-    <!-- This now points to the compiled JavaScript bundle -->
-    <script type="module" src="./bundle.js"></script>
+    <!-- The main application bundle is now loaded dynamically by the script above -->
   <script type="module" src="/index.tsx"></script>
 </body>
 </html>

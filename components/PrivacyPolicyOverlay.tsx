@@ -1,5 +1,6 @@
 import React from 'react';
 import { XIcon } from './icons';
+import { piService } from '../utils/pi';
 
 interface PrivacyPolicyOverlayProps {
     onClose: () => void;
@@ -18,6 +19,11 @@ const PrivacyPolicyOverlay: React.FC<PrivacyPolicyOverlayProps> = ({ onClose, is
         ? 'h-full max-h-2xl w-auto max-w-[90vh]'
         : 'w-full max-w-2xl max-h-[90dvh]';
         
+    const handleLinkClick = (e: React.MouseEvent, url: string) => {
+        e.preventDefault();
+        piService.openUrl(url);
+    };
+
     return (
         <div
             className="fixed inset-0 bg-black/80 backdrop-blur-md z-[52] flex items-center justify-center font-sans p-4"
@@ -40,7 +46,7 @@ const PrivacyPolicyOverlay: React.FC<PrivacyPolicyOverlayProps> = ({ onClose, is
                 <div className="flex-grow overflow-y-auto p-4 sm:p-6 space-y-6">
                     <p className="text-neutral-400 text-sm">Last Updated: August 13, 2025</p>
 
-                    <p>Welcome to 3D Snake! Your privacy is important to us. This Privacy Policy explains how we collect, use, and protect your information when you play our game.</p>
+                    <p>Welcome to 3D Snake: Neon Grid Runner! Your privacy is important to us. This Privacy Policy explains how we collect, use, and protect your information when you play our game.</p>
                     
                     <Section title="1. Information We Collect">
                         <p>We collect a very limited amount of information to make the game work and to improve your experience:</p>
@@ -64,8 +70,8 @@ const PrivacyPolicyOverlay: React.FC<PrivacyPolicyOverlayProps> = ({ onClose, is
                      <Section title="3. Third-Party Services">
                         <p>We use the following third-party services:</p>
                         <ul className="list-disc list-inside pl-4 space-y-1">
-                            <li><strong>Firebase (Google):</strong> For hosting, analytics, and game configuration. You can view Google's privacy policy <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">here</a>.</li>
-                            <li><strong>InMobi:</strong> For serving in-game advertisements. When ads are shown, you will be presented with a consent dialog from InMobi's Consent Management Platform (CMP). This allows you to control your data preferences for advertising. You can review InMobi's privacy policy <a href="https://www.inmobi.com/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">here</a>.</li>
+                            <li><strong>Firebase (Google):</strong> For hosting, analytics, and game configuration. You can view Google's privacy policy <a href="https://policies.google.com/privacy" onClick={(e) => handleLinkClick(e, 'https://policies.google.com/privacy')} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">here</a>.</li>
+                            <li><strong>InMobi:</strong> For serving in-game advertisements. When ads are shown, you will be presented with a consent dialog from InMobi's Consent Management Platform (CMP). This allows you to control your data preferences for advertising. You can review InMobi's privacy policy <a href="https://www.inmobi.com/privacy-policy" onClick={(e) => handleLinkClick(e, 'https://www.inmobi.com/privacy-policy')} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">here</a>.</li>
                             <li><strong>Pi Network SDK:</strong> For authenticating you with your Pi account. We only request access to your username for leaderboard submissions and payments. We do not access any other personal information from your Pi account.</li>
                         </ul>
                     </Section>

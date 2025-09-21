@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DeviceType, UserDTO } from '../types';
+import { DeviceType } from '../types';
 import { isMobile } from '../utils/device';
 import { getGeoInfo, submitScore } from '../utils/leaderboard';
 import { SpinnerIcon } from './icons';
@@ -12,17 +12,22 @@ interface SubmitScoreProps {
     topSpeed: number;
   };
   onClose: () => void;
-  requestPiAuth: (onSuccess: () => void) => void;
+  requestPiAuth: (intent: 'submit-score' | 'purchase-ad', onSuccess: () => void, data?: any) => void;
   isRotated: boolean;
-  isForLeaderboard: boolean;
+  submissionDetails: {
+    isNewHighScore: boolean;
+    qualifiesForLeaderboard: boolean;
+  };
 }
 
-const SubmitScore: React.FC<SubmitScoreProps> = ({ scoreData, onClose, requestPiAuth, isRotated, isForLeaderboard }) => {
+const SubmitScore: React.FC<SubmitScoreProps> = ({ scoreData, onClose, requestPiAuth, isRotated, submissionDetails }) => {
   const [name, setName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const piUser = piService.getCurrentUser();
+  
+  const { isNewHighScore, qualifiesForLeaderboard } = submissionDetails;
 
   useEffect(() => {
     if (piUser) {
@@ -61,13 +66,29 @@ const SubmitScore: React.FC<SubmitScoreProps> = ({ scoreData, onClose, requestPi
     if (piService.getCurrentUser()) {
         await performSubmit();
     } else {
-        requestPiAuth(performSubmit);
+        requestPiAuth('submit-score', performSubmit, scoreData);
     }
   };
 
   const containerClasses = isRotated
     ? 'h-auto max-h-md w-full max-w-[90dvw]'
     : 'w-full max-w-md max-h-full';
+
+    // Determine the title and description based on the context
+    let title: string;
+    let description: string;
+    const showSubmissionForm = qualifiesForLeaderboard;
+
+    if (isNewHighScore) {
+        title = "New High Score!";
+        description = qualifiesForLeaderboard
+            ? "You've also made it to the leaderboard! Enter your name to submit your score."
+            : "Congratulations on setting a new personal best.";
+    } else {
+        // This case is only reachable if !isNewHighScore && qualifiesForLeaderboard
+        title = "Leaderboard Submission";
+        description = "You've qualified for the leaderboard! Enter your name to submit your score.";
+    }
 
   return (
     <div
@@ -84,57 +105,53 @@ const SubmitScore: React.FC<SubmitScoreProps> = ({ scoreData, onClose, requestPi
               <h2 id="submit-score-title" className="text-xl sm:text-2xl font-bold mt-2 sm:mt-4 text-green-400">Success!</h2>
               <p className="mt-2 text-neutral-300">Your score has been submitted to the leaderboard!</p>
             </div>
-          ) : isForLeaderboard ? (
-            <>
-              <img src="https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/trophy.png" alt="High Score Trophy" className="w-12 h-12 sm:w-16 sm:h-16 mx-auto" />
-              <h2 id="submit-score-title" className="text-xl sm:text-2xl font-bold mt-2 sm:mt-4">New High Score!</h2>
-              <p className="mt-2 text-neutral-300">You've made it to the leaderboard! Enter your name to save your score.</p>
-              <p className="text-3xl sm:text-4xl font-bold my-2 sm:my-4 text-cyan-300">{scoreData.score.toLocaleString()}</p>
-              
-              <form onSubmit={handleSubmit}>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder={piUser ? piUser.username : "Enter your name"}
-                  maxLength={20}
-                  required
-                  className="w-full px-4 py-3 bg-neutral-800 border-2 border-neutral-600 rounded-lg text-white text-center text-lg focus:outline-none focus:border-cyan-400 transition-colors"
-                  aria-label="Your name for the leaderboard"
-                />
-                {error && <p className="text-red-400 mt-2 text-sm">{error}</p>}
-                <div className="flex gap-4 mt-4 sm:mt-6">
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    disabled={isSubmitting}
-                    className="flex-1 px-4 py-3 bg-neutral-700 hover:bg-neutral-600 text-white font-bold rounded-lg transition-colors disabled:opacity-50"
-                  >
-                    Skip
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={!name.trim() || isSubmitting}
-                    className="flex-1 px-4 py-3 bg-green-700 hover:bg-green-800 text-white font-bold rounded-lg transition-colors disabled:opacity-50 disabled:bg-green-700/50 flex items-center justify-center"
-                  >
-                    {isSubmitting ? <SpinnerIcon className="w-6 h-6 animate-spin" /> : 'Submit'}
-                  </button>
-                </div>
-              </form>
-            </>
           ) : (
             <>
               <img src="https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/trophy.png" alt="High Score Trophy" className="w-12 h-12 sm:w-16 sm:h-16 mx-auto" />
-              <h2 id="submit-score-title" className="text-xl sm:text-2xl font-bold mt-2 sm:mt-4">New High Score!</h2>
-              <p className="mt-2 text-neutral-300">Congratulations on setting a new personal best.</p>
+              <h2 id="submit-score-title" className="text-xl sm:text-2xl font-bold mt-2 sm:mt-4">{title}</h2>
+              <p className="mt-2 text-neutral-300">{description}</p>
               <p className="text-3xl sm:text-4xl font-bold my-2 sm:my-4 text-cyan-300">{scoreData.score.toLocaleString()}</p>
-              <button
-                  type="button"
-                  onClick={onClose}
-                  className="w-full mt-4 sm:mt-6 px-4 py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-lg transition-colors"
-              >
-                  Continue
-              </button>
+              
+              {showSubmissionForm ? (
+                <form onSubmit={handleSubmit}>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder={piUser ? piUser.username : "Enter your name"}
+                    maxLength={20}
+                    required
+                    className="w-full px-4 py-3 bg-neutral-800 border-2 border-neutral-600 rounded-lg text-white text-center text-lg focus:outline-none focus:border-cyan-400 transition-colors"
+                    aria-label="Your name for the leaderboard"
+                  />
+                  {error && <p className="text-red-400 mt-2 text-sm">{error}</p>}
+                  <div className="flex gap-4 mt-4 sm:mt-6">
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      disabled={isSubmitting}
+                      className="flex-1 px-4 py-3 bg-neutral-700 hover:bg-neutral-600 text-white font-bold rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      Skip
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!name.trim() || isSubmitting}
+                      className="flex-1 px-4 py-3 bg-green-700 hover:bg-green-800 text-white font-bold rounded-lg transition-colors disabled:opacity-50 disabled:bg-green-700/50 flex items-center justify-center"
+                    >
+                      {isSubmitting ? <SpinnerIcon className="w-6 h-6 animate-spin" /> : 'Submit'}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                 <button
+                    type="button"
+                    onClick={onClose}
+                    className="w-full mt-4 sm:mt-6 px-4 py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-lg transition-colors"
+                >
+                    Continue
+                </button>
+              )}
             </>
           )}
         </div>
