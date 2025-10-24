@@ -1,4 +1,5 @@
 
+
 export type GraphicsQuality = 'High' | 'Medium' | 'Low';
 
 export type Point3D = { x: number; y: number; z: number };
@@ -147,6 +148,7 @@ export interface GameConfig {
   maxExtraLivesTotal: number;
   appleScore: number;
   speedBoostDuration: number;
+  speedBoostFactor: number;
   magnetDuration: number;
   scoreDoublerDuration: number;
   tripleDuration: number;
@@ -238,6 +240,53 @@ export type PromoCode = {
     isActive: boolean;
 };
 
+// NEW: Settings for the third-person camera
+export type ThirdPersonCameraSettings = {
+  distance: number;
+  height: number;
+};
+
+// NEW: Notification type for in-game alerts
+export type AppNotification = {
+  id: number;
+  message: string;
+  type: 'info' | 'mention';
+};
+
+
+// --- Types for Bus Stop Chat ---
+
+export type ChatMessage = {
+  // From spreadsheet
+  id: string; // MessageID
+  timestamp: number; // TIMES (epoch seconds)
+  pi_uid: string;
+  pi_name: string;
+  screen_name: string;
+  message: string;
+  message_type: string;
+  reply_to_id: string;
+  status: string;
+  region: string;
+  // Client-side additions
+  color: string;
+};
+
+export type BusStopSettings = {
+  chatterName: string;
+  autoRefreshOnClose: boolean;
+  autoRefreshInterval: 2 | 5 | 10 | 15 | 30 | 60; // in minutes
+  notificationsOn: boolean;
+  notifyOnMention: boolean;
+  notifyOnNewActivity: boolean;
+  notificationSoundOn: boolean;
+  mutedUsers: {
+    pi_username: string; // The user's actual Pi username for reliable muting
+    screen_name: string; // The user's screen name at the time of muting, for display
+  }[];
+};
+
+
 // --- Pi Network SDK Types ---
 
 export interface UserDTO {
@@ -271,6 +320,31 @@ export interface PaymentDTO {
         [key: string]: any;
     };
 }
+
+// --- Player Stats ---
+export type NodeCollection = { [key in FruitType]?: number };
+
+export type LifeStats = {
+    score: number;
+    startTime: number;
+    duration: number; // in seconds
+    nodesCollected: NodeCollection;
+    topSpeed: number;
+    portalsEntered: number;
+    successfulPassages: number;
+};
+
+export type CareerStats = {
+    totalGridTime: number; // in seconds
+    totalDistanceTravelled: number; // in grid units
+    allTimeHighScore: number;
+    highestSingleLifeScore: number;
+    personalBestLifeDuration: number; // in seconds
+    nodesCollected: NodeCollection;
+    portalsEntered: number;
+    successfulPassages: number;
+    failedPassages: number;
+};
 
 declare global {
     interface Window {

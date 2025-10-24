@@ -24,6 +24,31 @@
     <meta property="twitter:description" content="3D Snake: Neon Grid Runner is the classic snake game, now in 3D and from the snake's point of view. Built with React and three.js.">
     <meta property="twitter:image" content="https://raw.githubusercontent.com/n3ptun3-dev/assets/refs/heads/main/images/Snake%20banner.jpg">
     
+    <style>
+      /* Set a fallback value for the vh unit. */
+      :root {
+        --vh: 1vh;
+      }
+    </style>
+    <script>
+      // This script calculates the real viewport height and sets it as a CSS variable.
+      // This helps avoid layout issues on mobile browsers with dynamic address bars.
+      function setRealViewportHeight() {
+        // Ensure this only runs in a browser environment.
+        if (typeof window !== 'undefined' && window.innerHeight) {
+          let vh = window.innerHeight * 0.01;
+          document.documentElement.style.setProperty('--vh', `${vh}px`);
+        }
+      }
+
+      // Set the value on initial load.
+      setRealViewportHeight();
+
+      // Update the value on resize and orientation change.
+      window.addEventListener('resize', setRealViewportHeight);
+      window.addEventListener('orientationchange', setRealViewportHeight);
+    </script>
+    
     <script>
       // --- UNIFIED PRE-APP LOGGER ---
       // This is defined SYNCHRONOUSLY to prevent race conditions. It ensures the logger
@@ -187,29 +212,7 @@
       })();
     </script>
     
-<style>
-  @tailwind base;
-  @tailwind components;
-  @tailwind utilities;
-
-  html, body {
-    margin: 0;
-    padding: 0;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-  }
-  .pi-browser-rotated {
-    width: 100vh;
-    height: 100vw;
-    position: fixed;
-    top: 0;
-    left: 100vw;
-    transform: rotate(90deg);
-    transform-origin: top left;
-    overflow: hidden;
-  }
-</style>
+<link rel="stylesheet" href="/styles.css">
 <script type="importmap">
 {
   "imports": {
@@ -232,7 +235,7 @@
 
 <link rel="stylesheet" href="/index.css">
 </head>
-  <body style="background-color: #262626;">
+  <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
     <!-- The main application bundle is now loaded dynamically by the script above -->

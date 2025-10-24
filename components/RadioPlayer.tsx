@@ -54,7 +54,14 @@ const RadioPlayer: React.FC<RadioPlayerProps> = ({
                         <SpinnerIcon className="w-8 h-8 animate-spin" />
                     </div>
                 )}
-                {error && <p className="text-red-400 text-center p-4 text-sm">{error}</p>}
+                {error && (
+                    <div className="text-center p-4">
+                        <p className="text-red-400 text-sm">{error}</p>
+                        <p className="text-neutral-400 text-xs mt-2">
+                            Friendly reminder: Save your favorite stations by tapping the star icon! Saved stations will still be available even when the radio search is down.
+                        </p>
+                    </div>
+                )}
                 {!loading && !error && stations.length === 0 && (
                     <p className="text-neutral-500 text-center pt-4">Search for stations to begin.</p>
                 )}

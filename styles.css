@@ -1,3 +1,48 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    @apply w-full m-0 p-0 overflow-hidden bg-neutral-800;
+    height: 100vh; /* Fallback */
+    height: calc(var(--vh, 1vh) * 100);
+  }
+}
+
+@keyframes slide-in-out-right {
+  0% {
+    transform: translateX(120%);
+    opacity: 0;
+  }
+  10%, 90% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(120%);
+    opacity: 0;
+  }
+}
+
+.animate-notification {
+  animation: slide-in-out-right 4s ease-in-out forwards;
+}
+
+.line-clamp-5 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  overflow: hidden;
+}
+
+.pi-browser-rotated {
+  width: calc(var(--vh, 1vh) * 100);
+  height: 100vw;
+  position: fixed;
+  top: 0;
+  left: 100vw;
+  transform: rotate(90deg);
+  transform-origin: top left;
+  overflow: hidden;
+}

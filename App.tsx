@@ -1,6 +1,4 @@
-
-
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import Board, { BoardRef } from './components/Board';
 import Controls from './components/Controls';
 import GameHUD from './components/GameHUD';
@@ -12,7 +10,6 @@ import GraphicsSettings from './components/GraphicsSettings';
 import HowToPlayOverlay from './components/HowToPlayOverlay';
 import FeedbackOverlay from './components/FeedbackOverlay';
 import JoinPiOverlay from './components/JoinPiOverlay';
-import AboutSpiOverlay from './components/AboutSpiOverlay';
 import CreditsOverlay from './components/CreditsOverlay';
 import TermsAndConditionsOverlay from './components/TermsAndConditionsOverlay';
 import PrivacyPolicyOverlay from './components/PrivacyPolicyOverlay';
@@ -20,8 +17,17 @@ import PiAuthModal from './components/PiAuthModal';
 import NonPiBrowserModal from './components/NonPiBrowserModal';
 import LinkDeviceModal from './components/LinkDeviceModal';
 import EnterCodeModal from './components/EnterCodeModal';
-import { CameraView, Point3D, GameState, Fruit, FruitType, ActiveEffect, LayoutDetails, GameConfig, RadioStation, RadioBrowserStation, ApprovedAd, BillboardData, LeaderboardEntry, GraphicsQuality, PromoCode, UserDTO } from './types';
-import { BOARD_WIDTH, BOARD_DEPTH, FULL_BOARD_WIDTH, FULL_BOARD_DEPTH, FRUIT_CATEGORIES, VIEW_CYCLE } from './constants';
+import WhatsNewOverlay from './components/WhatsNewOverlay';
+import ExternalLinkWarningModal from './components/ExternalLinkWarningModal';
+import BusStopOverlay from './components/BusStopOverlay';
+import BusStopChat from './components/BusStopChat';
+import SetScreenNameModal from './components/SetScreenNameModal';
+import CommunityGuidelinesOverlay from './components/CommunityGuidelinesOverlay';
+import MenuOverlay from './components/MenuOverlay';
+import CareerProfile from './components/CareerProfile';
+import PostRunDebrief from './components/PostRunDebrief';
+import { CameraView, Point3D, GameState, Fruit, FruitType, ActiveEffect, LayoutDetails, GameConfig, RadioStation, RadioBrowserStation, ApprovedAd, BillboardData, LeaderboardEntry, GraphicsQuality, PromoCode, UserDTO, ThirdPersonCameraSettings, BusStopSettings, AppNotification, CareerStats, LifeStats, NodeCollection } from './types';
+import { BOARD_WIDTH, BOARD_DEPTH, FULL_BOARD_WIDTH, FULL_BOARD_DEPTH, FRUIT_CATEGORIES } from './constants';
 import audioManager from './sounds';
 import { generateLayoutDetails, isWall, isPortalBlock, getPortalEmergence, getStreetPassageSpawnPoint, isValidSpawnLocation, getBoardSpawnPoint, isStreetPassageBlock, getPortalAbsolutePosition } from './components/gameLogic';
 import { isMobile, confirmIsPiBrowser } from './utils/device';
@@ -36,6 +42,17 @@ import { PI_SANDBOX, VERBOSE_LOGGING } from './config';
 
 const WALL_THICKNESS = (FULL_BOARD_WIDTH - BOARD_WIDTH) / 2;
 
+const LIGHT_SHOW_DURATION = 88000;
+
+const SHOWCASE_CAMERA_CYCLE: CameraView[] = [
+  CameraView.ORBIT,
+  CameraView.DRONE_1,
+  CameraView.DRONE_2,
+  CameraView.FIRST_PERSON,
+  CameraView.THIRD_PERSON,
+];
+
+
 const createSnakeAtStart = (length: number): Point3D[] => {
   const path: Point3D[] = [];
   const startX = Math.floor(BOARD_WIDTH / 2) + WALL_THICKNESS;
@@ -43,22 +60,18 @@ const createSnakeAtStart = (length: number): Point3D[] => {
   
   const headZ = maxZ - 2;
 
-  // First segments are on the board, leading straight to the back wall.
-  // The snake's head will be at path[0], facing towards negative Z.
   path.push({ x: startX, y: 1, z: headZ });
   path.push({ x: startX, y: 1, z: headZ + 1 });
-  path.push({ x: startX, y: 1, z: maxZ }); // This is z = maxZ, at the wall boundary.
+  path.push({ x: startX, y: 1, z: maxZ }); 
 
   const segmentsOnBoard = path.length;
   if (length <= segmentsOnBoard) {
     return path.slice(0, length);
   }
 
-  // The rest of the snake's body goes straight up from the wall.
   const verticalSegmentX = startX;
   const verticalSegmentZ = maxZ;
   for (let i = 0; i < length - segmentsOnBoard; i++) {
-    // y starts at 2 because y=1 is the board.
     path.push({ x: verticalSegmentX, y: 1 + (i + 1), z: verticalSegmentZ });
   }
 
@@ -71,7 +84,6 @@ const getInitialFruits = (currentSnake: Point3D[], currentLayoutDetails: LayoutD
   if (applePos) {
     initialFruits.push({ id: Date.now(), type: FruitType.APPLE, position: applePos, spawnTime: performance.now() });
   }
-  // For initial spawn, we still use the simple chance, bucket will be used for subsequent spawns.
   const passagePos = getStreetPassageSpawnPoint(currentLayoutDetails);
   if (passagePos && isValidSpawnLocation(passagePos, currentSnake, initialFruits, currentLayoutDetails)) {
       let passageFruitType = Math.random() < config.extraLifeChance ? FruitType.EXTRA_LIFE : FruitType.TRIPLE;
@@ -90,12 +102,10 @@ const determineWeather = (
     const hasCollectedExtraLives = extraLivesCollected > 0;
     const hasReachedRainLimit = rainOccurrences >= 1;
 
-    // If the player has never collected an extra life and it has already rained, it must be clear.
     if (!hasCollectedExtraLives && hasReachedRainLimit) {
         return 'Clear';
     }
 
-    // Otherwise, there's a 20% chance of rain.
     const willRain = Math.random() < 0.2;
     return willRain ? 'Rain' : 'Clear';
 };
@@ -105,11 +115,9 @@ const defaultSavedStations: RadioStation[] = [
     { name: 'Magic Party Mix', url: 'https://live.magicfm.ro/magic.party.mix', favicon: 'https://media.bauerradio.com/image/upload/c_crop,g_custom/v1606492636/brand_manager/stations/agepcxvlmp6fbmslx6tt.jpg' },
 ];
 
-// Extend the global Window interface for our pre-app logger
 declare global {
     interface Window {
         preAppLogger?: {
-            // FIX: Made the '_queue' property required to resolve conflict with other global declarations.
             _queue: string[];
             log: (source: string, ...args: any[]) => void;
         };
@@ -139,6 +147,7 @@ const App: React.FC = () => {
   const [rainOccurrencesThisGame, setRainOccurrencesThisGame] = useState(0);
 
   const [isPassageFruitActive, setIsPassageFruitActive] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [boardFruitCooldown, setBoardFruitCooldown] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(!!document.fullscreenElement);
@@ -153,10 +162,25 @@ const App: React.FC = () => {
   const [isHowToPlayOpen, setIsHowToPlayOpen] = useState(false);
   const [showHowToPlayBackdrop, setShowHowToPlayBackdrop] = useState(true);
   const [isJoinPiOpen, setIsJoinPiOpen] = useState(false);
-  const [isAboutSpiOpen, setIsAboutSpiOpen] = useState(false);
   const [isCreditsOpen, setIsCreditsOpen] = useState(false);
   const [isTermsOpen, setIsTermsOpen] = useState(false);
   const [isPrivacyPolicyOpen, setIsPrivacyPolicyOpen] = useState(false);
+  const [isBusStopOpen, setIsBusStopOpen] = useState(false);
+  const [isBusStopChatOpen, setIsBusStopChatOpen] = useState(false);
+  const [isSetScreenNameModalOpen, setIsSetScreenNameModalOpen] = useState(false);
+  const [isCommunityGuidelinesOpen, setIsCommunityGuidelinesOpen] = useState(false);
+  const [busStopSettings, setBusStopSettings] = useState<BusStopSettings | null>(() => {
+    try {
+      const saved = localStorage.getItem('snakeBusStopSettings');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+      return null;
+    } catch (e) {
+      console.warn('Could not read bus stop settings from localStorage.', e);
+      return null;
+    }
+  });
   const [lastGameData, setLastGameData] = useState<{ score: number; level: number; topSpeed: number; } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [cameraView, setCameraView] = useState<CameraView>(CameraView.ORBIT);
@@ -176,11 +200,31 @@ const App: React.FC = () => {
   
   // Settings and Radio State
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSettingsFromMenu, setIsSettingsFromMenu] = useState(false);
   const [isGraphicsSettingsOpen, setIsGraphicsSettingsOpen] = useState(false);
+  const [isThirdPersonSettingsOpen, setIsThirdPersonSettingsOpen] = useState(false);
+  const [thirdPersonCameraSettings, setThirdPersonCameraSettings] = useState<ThirdPersonCameraSettings>(() => {
+      try {
+          const saved = localStorage.getItem('snakeThirdPersonSettings');
+          if (saved) {
+              const parsed = JSON.parse(saved);
+              if (typeof parsed.distance === 'number' && typeof parsed.height === 'number') {
+                  return parsed;
+              }
+          }
+      } catch (e) {
+          console.warn('Could not read third person settings from localStorage.', e);
+      }
+      return { distance: 2.5, height: 1.2 };
+  });
   const [graphicsQuality, setGraphicsQuality] = useState<GraphicsQuality>(() => {
-      return (localStorage.getItem('snakeGraphicsQuality') as GraphicsQuality) || 'Medium';
+      return (localStorage.getItem('snakeGraphicsQuality') as GraphicsQuality) || 'Low';
+  });
+  const [isLowQualityLightingDisabledPref, setIsLowQualityLightingDisabledPref] = useState<boolean>(() => {
+      return localStorage.getItem('snakeDynamicLightingDisabled') === 'true';
   });
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
+  const [isWhatsNewOpen, setIsWhatsNewOpen] = useState(false);
   const [musicSource, setMusicSource] = useState<'default' | 'radio' | 'saved'>('default');
   const [currentStation, setCurrentStation] = useState<RadioStation | null>(() => {
     try {
@@ -211,6 +255,9 @@ const App: React.FC = () => {
   // Pi Browser State
   const [isPiBrowser, setIsPiBrowser] = useState(false);
   const [isRotated, setIsRotated] = useState(false);
+  const [isFullScreenSupported, setIsFullScreenSupported] = useState<boolean>(() => {
+    return sessionStorage.getItem('snakeFullScreenUnsupported') !== 'true';
+  });
 
   // AMI State
   const [isAmiOpen, setIsAmiOpen] = useState(false);
@@ -223,25 +270,54 @@ const App: React.FC = () => {
   const [isPiAuthModalOpen, setIsPiAuthModalOpen] = useState(false);
   const [onAuthSuccessCallback, setOnAuthSuccessCallback] = useState<(() => void) | null>(null);
   const [initialOverlayToShow, setInitialOverlayToShow] = useState<string | null>(null);
-  // FIX: Updated nonPiBrowserAction state to include 'link-device' intent and allow any data type to resolve the type conflict.
-  const [nonPiBrowserAction, setNonPiBrowserAction] = useState<{ intent: 'submit-score' | 'purchase-ad' | 'link-device'; data?: any } | null>(null);
+  const [nonPiBrowserAction, setNonPiBrowserAction] = useState<{ intent: 'submit-score' | 'purchase-ad' | 'link-device' | 'donation'; data?: any } | null>(null);
+  const [deepLinkIntent, setDeepLinkIntent] = useState<{ intent: string; data?: any } | null>(null);
   
   // Crash/Respawn/Game Over state
   const [crashOutcome, setCrashOutcome] = useState<'respawn' | 'gameOver' | null>(null);
   const [nextSnake, setNextSnake] = useState<Point3D[] | null>(null);
   const [isGameOverHudVisible, setIsGameOverHudVisible] = useState(false);
 
-  // NEW: State for linking modals
+  // Linking modals
   const [isLinkDeviceModalOpen, setIsLinkDeviceModalOpen] = useState(false);
   const [isEnterCodeModalOpen, setIsEnterCodeModalOpen] = useState(false);
 
-  // NEW: State for UI pulse animations
+  // UI pulse animations
   const [showMusicPulse, setShowMusicPulse] = useState(false);
   const [showCameraPulse, setShowCameraPulse] = useState(false);
   
-  // NEW: State for interactive orbit view
+  // Interactive orbit view
   const [isOrbitDragging, setIsOrbitDragging] = useState(false);
   
+  // External link warning modal
+  const [externalLinkToConfirm, setExternalLinkToConfirm] = useState<string | null>(null);
+
+  // In-game notifications
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  
+  const onOpenLinkDevice = () => setIsLinkDeviceModalOpen(true);
+  const onOpenEnterCode = () => setIsEnterCodeModalOpen(true);
+  
+  // Career Profile & Stats
+  const [isCareerProfileOpen, setIsCareerProfileOpen] = useState(false);
+  const [careerStats, setCareerStats] = useState<CareerStats | null>(() => {
+    try {
+      const saved = localStorage.getItem('snakeCareerStats');
+      if (saved) return JSON.parse(saved);
+    } catch (e) { console.error("Failed to load career stats", e); }
+    return {
+        totalGridTime: 0, totalDistanceTravelled: 0, allTimeHighScore: 0, highestSingleLifeScore: 0,
+        personalBestLifeDuration: 0, nodesCollected: {}, portalsEntered: 0, successfulPassages: 0, failedPassages: 0,
+    };
+  });
+  const onOpenCareerProfile = () => setIsCareerProfileOpen(true);
+
+  // Per-Life Stats & Post-Run Debrief
+  const [lifeScore, setLifeScore] = useState(0);
+  const [currentLifeStats, setCurrentLifeStats] = useState<Omit<LifeStats, 'score' | 'duration'>>({ startTime: 0, nodesCollected: {}, topSpeed: 0, portalsEntered: 0, successfulPassages: 0 });
+  const [lastLifeStats, setLastLifeStats] = useState<LifeStats | null>(null);
+  const [isPostRunDebriefOpen, setIsPostRunDebriefOpen] = useState(false);
+
   const animationFrameRef = useRef<number | null>(null);
   const passageFruitRetryTimer = useRef<number | null>(null);
   const commandQueue = useRef<('left' | 'right')[]>([]);
@@ -253,6 +329,7 @@ const App: React.FC = () => {
   const radioApiBaseUrlRef = useRef<string | null>(null);
   const musicPulseTimerRef = useRef<number | null>(null);
   const cameraPulseTimerRef = useRef<number | null>(null);
+  const cameraCycleTimerRef = useRef<number | null>(null);
 
   const snakeRef = useRef(snake); snakeRef.current = snake;
   const fruitsRef = useRef(fruits); fruitsRef.current = fruits;
@@ -276,29 +353,59 @@ const App: React.FC = () => {
   const crashOutcomeRef = useRef(crashOutcome); crashOutcomeRef.current = crashOutcome;
   const nextSnakeRef = useRef(nextSnake); nextSnakeRef.current = nextSnake;
   
+  const lifeScoreRef = useRef(lifeScore); lifeScoreRef.current = lifeScore;
+  const currentLifeStatsRef = useRef(currentLifeStats); currentLifeStatsRef.current = currentLifeStats;
+
+  const isAnyUIOverlayOpen = useMemo(() => {
+      return isAmiOpen || isLeaderboardOpen || isSubmitScoreOpen || isHowToPlayOpen || 
+             isFeedbackOpen || isWhatsNewOpen || isJoinPiOpen || isCreditsOpen || isTermsOpen || 
+             isPrivacyPolicyOpen || isPiAuthModalOpen || !!nonPiBrowserAction || 
+             isLinkDeviceModalOpen || isEnterCodeModalOpen || isBusStopOpen || isBusStopChatOpen || 
+             isSetScreenNameModalOpen || isGraphicsSettingsOpen || isSettingsOpen || 
+             !!externalLinkToConfirm || isCommunityGuidelinesOpen || isMenuOpen || isCareerProfileOpen ||
+             isPostRunDebriefOpen;
+  }, [
+      isAmiOpen, isLeaderboardOpen, isSubmitScoreOpen, isHowToPlayOpen, isFeedbackOpen,
+      isWhatsNewOpen, isJoinPiOpen, isCreditsOpen, isTermsOpen, isPrivacyPolicyOpen,
+      isPiAuthModalOpen, nonPiBrowserAction, isLinkDeviceModalOpen, isEnterCodeModalOpen,
+      isBusStopOpen, isBusStopChatOpen, isSetScreenNameModalOpen, isGraphicsSettingsOpen,
+      isSettingsOpen, externalLinkToConfirm, isCommunityGuidelinesOpen, isMenuOpen, isCareerProfileOpen,
+      isPostRunDebriefOpen
+  ]);
+  
+  const shouldPauseAnimation = useMemo(() => {
+      const modalsThatPause = isAmiOpen || isLeaderboardOpen || isSubmitScoreOpen || 
+             isFeedbackOpen || isWhatsNewOpen || isJoinPiOpen || isCreditsOpen || isTermsOpen || 
+             isPrivacyPolicyOpen || isPiAuthModalOpen || !!nonPiBrowserAction || 
+             isLinkDeviceModalOpen || isEnterCodeModalOpen || 
+             isGraphicsSettingsOpen || 
+             !!externalLinkToConfirm || isCommunityGuidelinesOpen || isMenuOpen || isCareerProfileOpen ||
+             (isHowToPlayOpen && showHowToPlayBackdrop) || // Only pause if opened from menu
+             (isSettingsOpen && isSettingsFromMenu) ||
+             isPostRunDebriefOpen; // Post-run debrief should pause the background
+
+      return modalsThatPause;
+  }, [
+      isAmiOpen, isLeaderboardOpen, isSubmitScoreOpen, isHowToPlayOpen, isFeedbackOpen,
+      isWhatsNewOpen, isJoinPiOpen, isCreditsOpen, isTermsOpen, isPrivacyPolicyOpen,
+      isPiAuthModalOpen, nonPiBrowserAction, isLinkDeviceModalOpen, isEnterCodeModalOpen,
+      isGraphicsSettingsOpen, isSettingsOpen, externalLinkToConfirm, isCommunityGuidelinesOpen, isMenuOpen,
+      showHowToPlayBackdrop, isSettingsFromMenu, isCareerProfileOpen, isPostRunDebriefOpen
+  ]);
+
   useEffect(() => {
     const unsubscribe = piService.subscribe(setPiUser);
     return unsubscribe;
   }, []);
 
-  useEffect(() => {
-    // When the rotation state changes, the CSS takes a moment to apply.
-    // We wait for that, then manually tell the Board component to resize its canvas.
-    const timer = setTimeout(() => {
-      boardRef.current?.handleResize();
-    }, 100); // A small delay is enough for the DOM to update.
-
-    return () => clearTimeout(timer);
-  }, [isRotated]);
-
-  const requestPiAuth = (intent: 'submit-score' | 'purchase-ad' | 'link-device', onSuccess: () => void, data?: any) => {
+  const requestPiAuth = useCallback((intent: 'submit-score' | 'purchase-ad' | 'link-device' | 'donation', onSuccess: () => void, data?: any) => {
     if (isPiBrowser) {
         setOnAuthSuccessCallback(() => onSuccess);
         setIsPiAuthModalOpen(true);
     } else {
         setNonPiBrowserAction({ intent, data });
     }
-  };
+  }, [isPiBrowser]);
   
   const handleRadioError = useCallback(() => {
     setRadioPlaybackError("No playable source was found for this station.");
@@ -314,6 +421,15 @@ const App: React.FC = () => {
     localStorage.setItem('snakeGraphicsQuality', quality);
   };
 
+  const handleLowQualityLightingPrefChange = (isDisabled: boolean) => {
+    setIsLowQualityLightingDisabledPref(isDisabled);
+    localStorage.setItem('snakeDynamicLightingDisabled', String(isDisabled));
+  };
+
+  const activeDynamicLightingDisabled = useMemo(() => {
+    return graphicsQuality === 'Low' && isLowQualityLightingDisabledPref;
+  }, [graphicsQuality, isLowQualityLightingDisabledPref]);
+
   const handleOpenSettings = () => {
     if (musicPulseTimerRef.current) {
         clearTimeout(musicPulseTimerRef.current);
@@ -324,11 +440,9 @@ const App: React.FC = () => {
   };
 
   const handleLeaderboardUpdate = useCallback((allScores: LeaderboardEntry[]) => {
-    // console.log("Leaderboard opened, refreshing billboard data...");
     const topScores = [...allScores].sort((a, b) => b.score - a.score).slice(0, 3);
     const topSpeeds = [...allScores].sort((a, b) => b.speed - a.speed).slice(0, 3);
     setBillboardData(currentData => {
-        // Only update if there's a material change to avoid unnecessary re-renders
         if (JSON.stringify(currentData?.topScores) !== JSON.stringify(topScores) ||
             JSON.stringify(currentData?.topSpeeds) !== JSON.stringify(topSpeeds)) {
             return { topScores, topSpeeds };
@@ -337,7 +451,6 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // Radio Music Effect - plays uninterrupted by game state changes
   useEffect(() => {
     if ((musicSource === 'radio' || musicSource === 'saved') && currentStation) {
       audioManager.playRadio(currentStation.url, handleRadioError);
@@ -346,10 +459,9 @@ const App: React.FC = () => {
     }
   }, [musicSource, currentStation, handleRadioError]);
 
-  // Default Music Effect - handles lobby and background music
   useEffect(() => {
     if (musicSource === 'default') {
-      audioManager.stopRadio(); // Ensure radio is off
+      audioManager.stopRadio();
       if (gameState === 'Welcome' || gameState === 'GameOver' || (gameState === 'Playing' && isPaused)) {
         audioManager.playLobbyMusic();
       } else if (gameState === 'Playing' && !isPaused) {
@@ -358,19 +470,16 @@ const App: React.FC = () => {
         } else {
           audioManager.playBackgroundMusic();
         }
-      } else { // e.g. 'Starting' or 'Loading' state
+      } else {
         audioManager.stopAllDefaultMusic();
       }
-    } else { // musicSource is 'radio' or 'saved'
-      // Only stop default music if a radio station is selected and is supposed to be playing.
+    } else {
       if (currentStation) {
         audioManager.stopAllDefaultMusic();
       }
-      // If no station is selected yet, the default music continues to play.
     }
   }, [gameState, isPaused, musicSource, isCrashing, currentStation]);
   
-  // Flash message handler
   useEffect(() => {
     if (flashMessage) {
       const timer = setTimeout(() => setFlashMessage(null), 3000);
@@ -378,86 +487,81 @@ const App: React.FC = () => {
     }
   }, [flashMessage]);
 
-  // Persist radio search term
   useEffect(() => {
     localStorage.setItem('snake-radio-search-term', radioSearchTerm);
   }, [radioSearchTerm]);
   
-  // Persist saved stations
   useEffect(() => {
     try {
         localStorage.setItem('snake-saved-stations', JSON.stringify(savedStations));
     } catch (e) { console.error("Failed to save stations to localStorage", e); }
   }, [savedStations]);
 
-  // Persist and apply background play setting
+  useEffect(() => {
+    try {
+        localStorage.setItem('snakeThirdPersonSettings', JSON.stringify(thirdPersonCameraSettings));
+    } catch (e) { console.error("Failed to save third-person camera settings to localStorage", e); }
+  }, [thirdPersonCameraSettings]);
+
   useEffect(() => {
       localStorage.setItem('snake-background-play', String(isBackgroundPlayEnabled));
       audioManager.setAllowBackgroundPlay(isBackgroundPlayEnabled);
   }, [isBackgroundPlayEnabled]);
 
-  // Dynamic screen orientation management for fullscreen mode
   useEffect(() => {
     if (!screen.orientation || isPiBrowser) return;
 
     if (isFullScreen) {
       if (gameState === 'Playing' && !isPaused) {
-        // When gameplay is active, lock to landscape
         if (typeof (screen.orientation as any).lock === 'function') {
-          (screen.orientation as any).lock('landscape').catch((err: any) => {
-              // console.warn("Could not re-lock screen to landscape:", err);
-          });
+          (screen.orientation as any).lock('landscape').catch((err: any) => {});
         }
       } else {
-        // When in menus (paused, game over, etc.), unlock to allow portrait reading
         if (typeof screen.orientation.unlock === 'function') {
           screen.orientation.unlock();
         }
       }
     }
-    // No `else` needed because `handleToggleFullScreen` handles unlocking on fullscreen exit.
   }, [gameState, isPaused, isFullScreen, isPiBrowser]);
 
-  // Main initialization effect
   useEffect(() => {
     const initApp = async () => {
-      // Step 1: Await the result of the environment check from index.html
-      const isRunningInPiBrowser = await confirmIsPiBrowser();
-      setIsPiBrowser(isRunningInPiBrowser);
-      piService.setIsPiBrowser(isRunningInPiBrowser);
+      const hostname = window.location.hostname;
+      if (window.preAppLogger) {
+        window.preAppLogger.log('[App Init]', `Current hostname: ${hostname}`);
+      } else {
+        console.log(`[App Init] Current hostname: ${hostname}`);
+      }
       
-      // After logger is initialized, handle logs from the pre-app logger queue
+      const detectedPiBrowser = await confirmIsPiBrowser();
+      setIsPiBrowser(detectedPiBrowser);
+      piService.setIsPiBrowser(detectedPiBrowser);
+      
       if (VERBOSE_LOGGING) {
           if (window.preAppLogger?._queue && Array.isArray(window.preAppLogger._queue)) {
-              // Drain the queue and send to the main logger service
               while(window.preAppLogger._queue.length > 0) {
                   const logMsg = window.preAppLogger._queue.shift();
                   if (logMsg) {
                       logger.log(logMsg);
                   }
               }
-              // Redirect any subsequent pre-app logs directly to the main logger.
               window.preAppLogger.log = (source, ...args) => {
                   const message = args.map(String).join(' ');
                   logger.log(`${source} ${message}`);
               };
           }
       } else {
-          // If verbose logging is disabled, clear the queue and neuter the log function
-          // to prevent memory leaks from an ever-growing log array.
           if (window.preAppLogger) {
               window.preAppLogger._queue = [];
-              window.preAppLogger.log = () => {}; // No-op
+              window.preAppLogger.log = () => {};
           }
       }
 
-      // Pi SDK is now initialized in index.html to ensure the detection handshake works.
       if (window.Pi) {
           logger.log(`App confirmed Pi SDK is initialized. Sandbox mode from config: ${PI_SANDBOX}`);
       }
 
-      // Step 2: Handle Service Worker registration
-      if (!isRunningInPiBrowser) {
+      if (!detectedPiBrowser) {
         if ('serviceWorker' in navigator) {
           window.addEventListener('load', () => {
             navigator.serviceWorker.register('/sw.js')
@@ -468,32 +572,42 @@ const App: React.FC = () => {
         }
       }
       
-      // Step 3: Proceed with the rest of the app initialization
       logger.log("Render start: Initializing app and fetching all data.");
       
       const urlParams = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams(window.location.hash.substring(1));
       const linkCode = urlParams.get('link');
-      const adData = urlParams.get('data');
+      const adData = hashParams.get('data');
       const path = window.location.pathname.toLowerCase();
-      let deepLinkIntent: { intent: string; data?: any } | null = null;
       
-      if (path.startsWith('/submit-score')) {
-          deepLinkIntent = {
+      if (linkCode) {
+          sessionStorage.setItem('hasSeenWelcome', 'true');
+          logger.log("Device link detected. Suppressing initial 'How to Play' overlay.");
+      }
+
+      if (path.startsWith('/submit-score') && window.location.hash) {
+          setDeepLinkIntent({
               intent: 'submit-score',
               data: {
-                  score: parseInt(urlParams.get('score') || '0', 10),
-                  level: parseInt(urlParams.get('level') || '1', 10),
-                  topSpeed: parseFloat(urlParams.get('speed') || '0'),
+                  score: parseInt(hashParams.get('score') || '0', 10),
+                  level: parseInt(hashParams.get('level') || '1', 10),
+                  topSpeed: parseFloat(hashParams.get('speed') || '0'),
               }
-          };
-      } else if (path.startsWith('/start-ad-purchase') || path.startsWith('/continue-ad-purchase')) {
-          deepLinkIntent = { intent: 'purchase-ad' };
+          });
+      } else if (path.startsWith('/start-ad-purchase')) {
+          setDeepLinkIntent({ intent: 'purchase-ad' });
+      } else if (path.startsWith('/continue-ad-purchase') && adData) {
+        try {
+            const decodedData = JSON.parse(atob(decodeURIComponent(adData)));
+            sessionStorage.setItem('piAdContinuationData', JSON.stringify(decodedData));
+        } catch (e) {
+            logger.log(`Failed to decode ad continuation data: ${(e as Error).message}`);
+            setFlashMessage("Error continuing ad purchase.");
+        }
       } else if (path === '/terms') {
           setInitialOverlayToShow('terms');
       } else if (path === '/credits') {
           setInitialOverlayToShow('credits');
-      } else if (path === '/about') {
-          setInitialOverlayToShow('about');
       } else if (path === '/privacy') {
           setInitialOverlayToShow('privacy');
       }
@@ -504,7 +618,7 @@ const App: React.FC = () => {
       const [config, ads, billboardDataResult, promos] = await Promise.all([
           fetchAndCacheGameConfig(),
           fetchApprovedAds(),
-          (async () => { // Wrap billboard fetch in an async function to handle errors
+          (async () => {
               try {
                   const [mobileScores, computerScores] = await Promise.all([
                       fetchLeaderboard('mobile').catch(() => []),
@@ -549,7 +663,7 @@ const App: React.FC = () => {
       setGameState('Welcome');
       logger.log("Render end: App is ready.");
       
-      if (linkCode && !isRunningInPiBrowser) {
+      if (linkCode && !detectedPiBrowser) {
         const validate = async () => {
             try {
                 setFlashMessage("Linking account...");
@@ -563,29 +677,6 @@ const App: React.FC = () => {
             }
         };
         validate();
-      } else if (path.startsWith('/continue-ad-purchase') && adData) {
-        try {
-            const decodedData = JSON.parse(atob(decodeURIComponent(adData)));
-            sessionStorage.setItem('piAdContinuationData', JSON.stringify(decodedData));
-            setIsAmiOpen(true);
-            window.history.replaceState({}, document.title, '/');
-        } catch (e) {
-            logger.log(`Failed to decode ad continuation data: ${(e as Error).message}`);
-            setFlashMessage("Error continuing ad purchase.");
-        }
-      } else if (isRunningInPiBrowser && deepLinkIntent) {
-          const { intent, data } = deepLinkIntent;
-          setTimeout(() => {
-              requestPiAuth(intent as any, () => {
-                  if (intent === 'submit-score' && data) {
-                      setLastGameData(data);
-                      setSubmissionDetails({ isNewHighScore: false, qualifiesForLeaderboard: true });
-                      setIsSubmitScoreOpen(true);
-                  } else if (intent === 'purchase-ad') {
-                      setIsAmiOpen(true);
-                  }
-              }, data);
-          }, 500);
       }
       
       if (path !== '/') {
@@ -602,8 +693,49 @@ const App: React.FC = () => {
       document.removeEventListener('fullscreenchange', handleFullScreenChange);
     };
   }, []);
+
+  useEffect(() => {
+    if (gameState !== 'Welcome' || !isPiBrowser) {
+        return;
+    }
+
+    const adContinuationData = sessionStorage.getItem('piAdContinuationData');
+
+    if (adContinuationData) {
+        const timer = setTimeout(() => {
+            try {
+                JSON.parse(adContinuationData);
+                requestPiAuth('purchase-ad', () => {
+                    setIsAmiOpen(true);
+                });
+            } catch (e) {
+                logger.log(`Error with ad continuation data: ${(e as Error).message}`);
+                setFlashMessage("Error continuing ad purchase.");
+                sessionStorage.removeItem('piAdContinuationData');
+            }
+        }, 500);
+        return () => clearTimeout(timer);
+    }
+
+    if (deepLinkIntent) {
+        const { intent, data } = deepLinkIntent;
+        const timer = setTimeout(() => {
+            requestPiAuth(intent as any, () => {
+                if (intent === 'submit-score' && data) {
+                    setLastGameData(data);
+                    setSubmissionDetails({ isNewHighScore: false, qualifiesForLeaderboard: true });
+                    setIsSubmitScoreOpen(true);
+                } else if (intent === 'purchase-ad') {
+                    setIsAmiOpen(true);
+                }
+            }, data);
+        }, 500);
+
+        setDeepLinkIntent(null);
+        return () => clearTimeout(timer);
+    }
+  }, [gameState, isPiBrowser, deepLinkIntent, requestPiAuth, setIsAmiOpen, setFlashMessage, setLastGameData, setSubmissionDetails, setIsSubmitScoreOpen]);
   
-  // Welcome HUD timer
   useEffect(() => {
       if (gameState === 'Welcome') {
           const timer = setTimeout(() => {
@@ -615,9 +747,7 @@ const App: React.FC = () => {
       }
   }, [gameState]);
   
-  // Game state change handler for UI pulse animations
   useEffect(() => {
-    // Clear any existing timers when gameState changes
     if (musicPulseTimerRef.current) clearTimeout(musicPulseTimerRef.current);
     if (cameraPulseTimerRef.current) clearTimeout(cameraPulseTimerRef.current);
     setShowMusicPulse(false);
@@ -635,18 +765,15 @@ const App: React.FC = () => {
         }, 5000);
     }
 
-    // Cleanup timers on component unmount
     return () => {
         if (musicPulseTimerRef.current) clearTimeout(musicPulseTimerRef.current);
         if (cameraPulseTimerRef.current) clearTimeout(cameraPulseTimerRef.current);
     };
   }, [gameState]);
 
-  // Effect to handle opening initial overlays (from URL or first-time visit)
   useEffect(() => {
       if (gameState === 'Welcome' && isWelcomePanelVisible) {
           if (initialOverlayToShow) {
-              // If a specific overlay is requested via URL, show it.
               switch (initialOverlayToShow) {
                   case 'terms':
                       setIsTermsOpen(true);
@@ -654,30 +781,22 @@ const App: React.FC = () => {
                   case 'credits':
                       setIsCreditsOpen(true);
                       break;
-                  case 'about':
-                      setIsAboutSpiOpen(true);
-                      break;
                   case 'privacy':
                       setIsPrivacyPolicyOpen(true);
                       break;
               }
-              // Clear the trigger and set the session flag so "How to Play" doesn't open later.
               setInitialOverlayToShow(null);
               sessionStorage.setItem('hasSeenWelcome', 'true');
           } else {
-              // Otherwise, check if it's the first visit in this session.
               const hasSeenWelcome = sessionStorage.getItem('hasSeenWelcome');
               if (!hasSeenWelcome) {
-                  // If it's the first visit, show the "How to Play" overlay after a delay.
                   const timer = setTimeout(() => {
                       setShowHowToPlayBackdrop(false);
                       setIsHowToPlayOpen(true);
-                  }, 2000); // 2 seconds after the welcome panel is visible
+                  }, 2000);
                   
-                  // Set the flag so it doesn't show on subsequent returns to the welcome screen.
                   sessionStorage.setItem('hasSeenWelcome', 'true');
                   
-                  // Cleanup the timer if the component unmounts or dependencies change.
                   return () => clearTimeout(timer);
               }
           }
@@ -691,10 +810,25 @@ const App: React.FC = () => {
     }
   }, [isExpanded]);
 
+  const handleOpenExternalUrl = (url: string) => {
+    setExternalLinkToConfirm(url);
+  };
+  
+  const showNotification = useCallback((message: string, type: 'info' | 'mention') => {
+    const newNotification: AppNotification = {
+        id: Date.now(),
+        message,
+        type,
+    };
+    setNotifications(prev => [...prev, newNotification]);
 
-  // Effect monitor for power-ups
+    setTimeout(() => {
+        setNotifications(prev => prev.filter(n => n.id !== newNotification.id));
+    }, 4000);
+  }, []);
+
+
   useEffect(() => {
-    // This effect should only run when the game is actively playing.
     if (gameState !== 'Playing' || isPaused) {
       return;
     }
@@ -703,11 +837,10 @@ const App: React.FC = () => {
       const now = performance.now();
       setActiveEffects(prevEffects => {
         const nextEffects = prevEffects.filter(effect => {
-          if (effect.duration === 0) return true; // Persistent effects
+          if (effect.duration === 0) return true;
           return now < effect.startTime + effect.duration;
         });
 
-        // Optimization: Only update state if the array has actually changed to prevent re-renders.
         if (nextEffects.length === prevEffects.length) {
           return prevEffects;
         }
@@ -719,18 +852,14 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [gameState, isPaused]);
   
-  // This effect ensures the camera view is correctly set whenever the game becomes playable.
   useEffect(() => {
     if (gameState === 'Playing') {
       setCameraView(lastGameplayView);
     }
   }, [gameState, lastGameplayView]);
   
-  // Effect to handle score submission modal after a game ends.
   useEffect(() => {
-    // This effect runs when the game is over and the final HUD is visible.
     if (gameState === 'GameOver' && lastGameData && isGameOverHudVisible) {
-      // Don't show popups for a score of 0.
       if (lastGameData.score <= 0) return;
 
       const checkAndShowPopup = async () => {
@@ -740,11 +869,8 @@ const App: React.FC = () => {
           const leaderboard = await fetchLeaderboard(isMobile() ? 'mobile' : 'computer');
           const lowestScore = leaderboard.length > 0 ? leaderboard[leaderboard.length - 1].score : 0;
           
-          // A score qualifies if the board isn't full OR the score is higher than the lowest,
-          // AND the score is greater than 20.
           const qualifiesForLeaderboard = (leaderboard.length < 100 || lastGameData.score > lowestScore) && lastGameData.score > 20;
 
-          // Open the modal if it's a new local high score OR it qualifies for the global leaderboard.
           if (isNewLocalHighScore || qualifiesForLeaderboard) {
               setSubmissionDetails({ isNewHighScore: isNewLocalHighScore, qualifiesForLeaderboard });
               setIsSubmitScoreOpen(true);
@@ -752,7 +878,6 @@ const App: React.FC = () => {
 
         } catch (error) {
           logger.log(`Failed to fetch leaderboard for score check: ${(error as Error).message}`);
-          // If the leaderboard check fails, we can still show the local high score modal if applicable.
           const isNewLocalHighScore = lastGameData.score === highScore;
           if (isNewLocalHighScore) {
               setSubmissionDetails({ isNewHighScore: true, qualifiesForLeaderboard: false });
@@ -761,15 +886,13 @@ const App: React.FC = () => {
         }
       };
 
-      // Use a timeout to let the Game Over screen settle before showing the popup.
       setTimeout(checkAndShowPopup, 2000);
     }
   }, [gameState, lastGameData, isGameOverHudVisible, highScore]);
 
-  // Effect to clean up fruits that are animating their highlight clearing
   useEffect(() => {
     if (clearingFruits.length === 0) return;
-    const CLEAR_DURATION = 1000; // ms
+    const CLEAR_DURATION = 1000;
     const interval = setInterval(() => {
         const now = performance.now();
         setClearingFruits(prev => prev.filter(cf => now < cf.startTime + CLEAR_DURATION));
@@ -779,7 +902,6 @@ const App: React.FC = () => {
 
   const finalizeGameOver = useCallback(() => {
     boardRef.current?.triggerLightEvent('gameOver', {});
-    audioManager.playGameOverSound();
     if (scoreRef.current > highScoreRef.current) {
       setHighScore(scoreRef.current);
       localStorage.setItem('snakeHighScore', scoreRef.current.toString());
@@ -788,11 +910,10 @@ const App: React.FC = () => {
     setIsGameOverHudVisible(false);
     setGameState('GameOver');
     setCameraView(CameraView.ORBIT);
-    if(isPiBrowser) setIsRotated(false);
-  }, [isPiBrowser]);
+    if(isPiBrowser || !isFullScreenSupported) setIsRotated(false);
+  }, [isPiBrowser, isFullScreenSupported]);
   
   const handleGameOverAnimationComplete = useCallback(() => {
-    // Delay to let the orbit start smoothly
     setTimeout(() => {
         setIsGameOverHudVisible(true);
     }, 500);
@@ -803,9 +924,6 @@ const App: React.FC = () => {
     audioManager.playCrashSound();
     setIsCrashing(true);
     
-    // The snake should be rendered at its last valid position.
-    // We update its rotation to reflect the final turn attempt, but keep the segments the same.
-    // The `crashedHead` position is used for effects, not for rendering the snake's body.
     setSnake(prevSnake => ({
       ...prevSnake,
       rotation: finalRotation
@@ -814,10 +932,14 @@ const App: React.FC = () => {
     const newLives = livesRef.current - 1;
     setLives(newLives);
 
-    if (newLives > 0) {
+    setCareerStats(prev => prev ? ({ ...prev, failedPassages: prev.failedPassages + 1 }) : prev);
+
+    if (newLives >= 0) { // Changed to >= 0 to handle debrief on last life
         setCrashOutcome('respawn');
-        const startingSnake = createSnakeAtStart(gameConfigRef.current!.initialSnakeLength);
-        setNextSnake(startingSnake);
+        if (newLives > 0) {
+            const startingSnake = createSnakeAtStart(gameConfigRef.current!.initialSnakeLength);
+            setNextSnake(startingSnake);
+        }
     } else {
         setCrashOutcome('gameOver');
         setNextSnake(null);
@@ -827,57 +949,118 @@ const App: React.FC = () => {
 
   }, []);
 
-  const handleCrashAnimationComplete = useCallback(() => {
-    setIsCrashing(false);
+  const handleContinueFromDebrief = useCallback(() => {
+    setIsPostRunDebriefOpen(false);
+    setLastLifeStats(null);
 
-    if (crashOutcomeRef.current === 'respawn') {
-        setActiveEffects([]);
-        setBaseGameSpeed(gameConfigRef.current!.initialGameSpeed);
-        
-        const startingSnake = nextSnakeRef.current!;
-        setSnake({ segments: startingSnake, rotation: 0 });
-        commandQueue.current = [];
-        setExtraLivesCollectedThisLife(0);
-        setVisualRotation(0);
-        
-        const newWeather = determineWeather(extraLivesCollectedThisGameRef.current, rainOccurrencesThisGameRef.current);
-        setWeather(newWeather);
-        if (newWeather === 'Rain') {
-            setRainOccurrencesThisGame(occurrences => occurrences + 1);
-        }
+    // This is the respawn logic
+    setActiveEffects([]);
+    setBaseGameSpeed(gameConfigRef.current!.initialGameSpeed);
+    
+    const startingSnake = nextSnakeRef.current!;
+    setSnake({ segments: startingSnake, rotation: 0 });
+    commandQueue.current = [];
+    setExtraLivesCollectedThisLife(0);
+    setVisualRotation(0);
+    
+    setLifeScore(0);
+    setCurrentLifeStats({ startTime: performance.now(), nodesCollected: {}, topSpeed: 0, portalsEntered: 0, successfulPassages: 0 });
 
-        const newFruits = getInitialFruits(startingSnake, layoutDetailsRef.current!, gameConfigRef.current!, extraLivesCollectedThisGameRef.current);
-        setFruits(newFruits);
-        setIsPassageFruitActive(newFruits.some(f => FRUIT_CATEGORIES[f.type] === 'PASSAGE'));
-
-        audioManager.playGameStartSound();
-        
-        // The crash animation leaves the camera high up. The 'Starting' state in Board.tsx
-        // will animate from that position down to the new snake.
-        setGameState('Starting');
-        // We DO NOT set camera view here, as that would cause a pre-animation jump.
-
-        // After the animation is complete, switch to 'Playing' state. The camera view will be set by the useEffect.
-        setTimeout(() => {
-          if (gameStateRef.current === 'Starting') {
-              setGameState('Playing');
-          }
-        }, 4000);
-
-    } else if (crashOutcomeRef.current === 'gameOver') {
-        finalizeGameOver();
+    const newWeather = determineWeather(extraLivesCollectedThisGameRef.current, rainOccurrencesThisGameRef.current);
+    setWeather(newWeather);
+    if (newWeather === 'Rain') {
+        setRainOccurrencesThisGame(occurrences => occurrences + 1);
     }
+
+    const newFruits = getInitialFruits(startingSnake, layoutDetailsRef.current!, gameConfigRef.current!, extraLivesCollectedThisGameRef.current);
+    setFruits(newFruits);
+    setIsPassageFruitActive(newFruits.some(f => FRUIT_CATEGORIES[f.type] === 'PASSAGE'));
+
+    audioManager.playGameStartSound();
+    audioManager.advanceTrack();
+    
+    setGameState('Starting');
+
+    setTimeout(() => {
+      if (gameStateRef.current === 'Starting') {
+          setGameState('Playing');
+      }
+    }, 4000);
 
     setCrashOutcome(null);
     setNextSnake(null);
+  }, []);
+
+  const handleFinalizeGame = useCallback(() => {
+      setIsPostRunDebriefOpen(false);
+      setLastLifeStats(null);
+      finalizeGameOver();
+  }, [finalizeGameOver]);
+
+  const handleEndGameFromDebrief = useCallback(() => {
+    setIsPostRunDebriefOpen(false);
+    setLastLifeStats(null);
+    handleResetToWelcome();
+  }, []);
+
+  const handleCrashAscendAnimationComplete = useCallback(() => {
+    setIsCrashing(false);
+
+    const outcome = crashOutcomeRef.current;
+    
+    // Always calculate stats, whether it's a respawn or the final life.
+    const duration = (performance.now() - currentLifeStatsRef.current.startTime) / 1000;
+    const finalLifeStats: LifeStats = { ...currentLifeStatsRef.current, score: lifeScoreRef.current, duration };
+    setLastLifeStats(finalLifeStats);
+
+    setCareerStats(prevStats => {
+        if (!prevStats) return null;
+        
+        const newNodesCollected: NodeCollection = { ...prevStats.nodesCollected };
+        for (const key in finalLifeStats.nodesCollected) {
+            const fruitType = key as unknown as FruitType;
+            newNodesCollected[fruitType] = (newNodesCollected[fruitType] || 0) + finalLifeStats.nodesCollected[fruitType]!;
+        }
+
+        const updatedStats: CareerStats = {
+            ...prevStats,
+            totalGridTime: prevStats.totalGridTime + duration,
+            allTimeHighScore: Math.max(prevStats.allTimeHighScore, scoreRef.current),
+            highestSingleLifeScore: Math.max(prevStats.highestSingleLifeScore, finalLifeStats.score),
+            personalBestLifeDuration: Math.max(prevStats.personalBestLifeDuration, duration),
+            nodesCollected: newNodesCollected,
+            portalsEntered: prevStats.portalsEntered + finalLifeStats.portalsEntered,
+            successfulPassages: prevStats.successfulPassages + finalLifeStats.successfulPassages,
+        };
+        
+        try {
+            localStorage.setItem('snakeCareerStats', JSON.stringify(updatedStats));
+        } catch (e) { console.error("Failed to save career stats", e); }
+        
+        return updatedStats;
+    });
+
+    if (outcome === 'gameOver' || livesRef.current <= 0) {
+        // This is the final life, trigger the new game over sequence.
+        setTimeout(() => {
+            audioManager.playGameOverSound();
+            setIsPostRunDebriefOpen(true);
+        }, 2000);
+    } else if (outcome === 'respawn') {
+        // This is a regular respawn with lives left.
+        setTimeout(() => {
+            setIsPostRunDebriefOpen(true);
+        }, 2000);
+    }
   }, [finalizeGameOver]);
 
   const handleStartGame = useCallback(() => {
     audioManager.playGameStartSound();
     setIsPaused(false);
     setIsCrashing(false);
+
+    audioManager.advanceTrack();
     
-    // Always reset the game state for a new game, including layout, snake, and fruits.
     const layoutForGame = generateLayoutDetails();
     setLayoutDetails(layoutForGame);
     
@@ -904,17 +1087,17 @@ const App: React.FC = () => {
     setExtraLivesCollectedThisLife(0);
     setExtraLivesCollectedThisGame(0);
     setVisualRotation(0);
+    setLifeScore(0);
+    setCurrentLifeStats({ startTime: performance.now(), nodesCollected: {}, topSpeed: 0, portalsEntered: 0, successfulPassages: 0 });
     
-    // Determine initial weather based on new logic
     const initialWeather = determineWeather(0, 0);
     setWeather(initialWeather);
     setRainOccurrencesThisGame(initialWeather === 'Rain' ? 1 : 0);
     
-    setGameId(id => id + 1); // This can be used by child components to detect a new game.
+    setCameraView(CameraView.ORBIT); // Reset camera to a neutral state before starting.
+    setGameId(id => id + 1);
     setGameState('Starting');
-    // Do not set camera view here to allow smooth animation from orbit view.
 
-    // The Board component handles the animation. After it's done, we switch to playing.
     setTimeout(() => {
       setGameState('Playing');
     }, 4000);
@@ -943,22 +1126,29 @@ const App: React.FC = () => {
     setTopSpeed(1000 / config.initialGameSpeed);
     setActiveEffects([]);
     setLastGameData(null);
+    
+    setGameState('Welcome');
     setIsPaused(false);
+
     setIsGameOverHudVisible(false);
     setVisualRotation(0);
     setIsCrashing(false);
     setWeather('Clear');
     setCameraView(CameraView.ORBIT);
-    setGameState('Welcome');
-    if (isPiBrowser) setIsRotated(false);
-  }, [isPiBrowser]);
+    if (isPiBrowser || !isFullScreenSupported) setIsRotated(false);
+  }, [isPiBrowser, isFullScreenSupported]);
 
   const handleTurn = useCallback((direction: 'left' | 'right') => {
     if (gameState !== 'Playing' || isPaused || isCrashing) return;
     if (direction === 'left') audioManager.playTurnLeftSound(); else audioManager.playTurnRightSound();
     if (commandQueue.current.length < 2) {
       commandQueue.current.push(direction);
-      setVisualRotation(rot => rot + (direction === 'left' ? Math.PI / 2 : -Math.PI / 2));
+      setVisualRotation(rot => {
+        let newRot = rot + (direction === 'left' ? Math.PI / 2 : -Math.PI / 2);
+        while (newRot > Math.PI) newRot -= 2 * Math.PI;
+        while (newRot <= -Math.PI) newRot += 2 * Math.PI;
+        return newRot;
+      });
     }
     setActiveKey(direction);
     setTimeout(() => setActiveKey(null), 150);
@@ -968,15 +1158,14 @@ const App: React.FC = () => {
     if (gameStateRef.current !== 'Playing' || isCrashingRef.current) return;
 
     setIsPaused(wasPaused => {
-      // If unpausing, restore the last gameplay view.
       if (wasPaused) {
         setCameraView(lastGameplayView);
+        audioManager.advanceTrack();
       }
       return !wasPaused;
     });
   }, [lastGameplayView]);
 
-  // Page Visibility API handler to pause/resume game
   useEffect(() => {
     const handleVisibilityChange = () => {
         const isHidden = document.visibilityState === 'hidden';
@@ -1009,13 +1198,18 @@ const App: React.FC = () => {
     if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen().then(() => {
             if (screen.orientation && typeof (screen.orientation as any).lock === 'function') {
-                // This is a "best effort" attempt.
                 (screen.orientation as any).lock('landscape').catch((err: any) => {
                     console.warn("Could not lock screen to landscape:", err);
                 });
             }
         }).catch((err) => {
-            // console.error("Error requesting fullscreen:", err);
+            console.warn("Fullscreen request failed:", err);
+            setIsFullScreenSupported(false);
+            try {
+                sessionStorage.setItem('snakeFullScreenUnsupported', 'true');
+            } catch (e) {
+                console.error("Failed to set sessionStorage for fullscreen support.", e);
+            }
         });
     } else {
         if (screen.orientation && typeof screen.orientation.unlock === 'function') {
@@ -1033,13 +1227,48 @@ const App: React.FC = () => {
       const isGameplayActive = gameState === 'Playing' && !isPaused && !isCrashing;
       if (isGameplayActive) return;
       
-      // The full camera cycle is now available when not in active gameplay.
       setCameraView(prev => {
-          const currentIndex = VIEW_CYCLE.indexOf(prev);
-          const nextIndex = (currentIndex + 1) % VIEW_CYCLE.length;
-          return VIEW_CYCLE[nextIndex];
+          const currentIndex = SHOWCASE_CAMERA_CYCLE.indexOf(prev);
+          const nextIndex = (currentIndex + 1) % SHOWCASE_CAMERA_CYCLE.length;
+          return SHOWCASE_CAMERA_CYCLE[nextIndex];
       });
   }, [gameState, isPaused, isCrashing]);
+
+  useEffect(() => {
+    const clearCameraCycleTimer = () => {
+        if (cameraCycleTimerRef.current) {
+            clearTimeout(cameraCycleTimerRef.current);
+            cameraCycleTimerRef.current = null;
+        }
+    };
+
+    const isIdleShowcase = ((gameState === 'Welcome' && isWelcomePanelVisible) || (gameState === 'GameOver' && isGameOverHudVisible));
+    
+    if (isIdleShowcase && isHudContentVisible) {
+        const scheduleNextCameraChange = () => {
+            clearCameraCycleTimer();
+
+            const currentIndex = SHOWCASE_CAMERA_CYCLE.indexOf(cameraView);
+            const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % SHOWCASE_CAMERA_CYCLE.length;
+            const nextView = SHOWCASE_CAMERA_CYCLE[nextIndex];
+            
+            let currentViewDuration = LIGHT_SHOW_DURATION;
+            if (cameraView === CameraView.FIRST_PERSON || cameraView === CameraView.THIRD_PERSON) {
+                currentViewDuration = LIGHT_SHOW_DURATION / 2;
+            }
+
+            cameraCycleTimerRef.current = window.setTimeout(() => {
+                setCameraView(nextView);
+            }, currentViewDuration);
+        };
+        
+        scheduleNextCameraChange();
+    } else {
+        clearCameraCycleTimer();
+    }
+
+    return clearCameraCycleTimer;
+  }, [gameState, isWelcomePanelVisible, isGameOverHudVisible, isHudContentVisible, cameraView]);
 
   const handleToggleGameplayView = useCallback(() => {
       if (cameraPulseTimerRef.current) {
@@ -1069,39 +1298,66 @@ const App: React.FC = () => {
         setRadioStations([]);
 
         try {
-            // Step 1: Discover a working server if we don't have one cached in the ref
-            if (!radioApiBaseUrlRef.current) {
-                const serverListResponse = await fetch('https://all.api.radio-browser.info/json/servers');
-                if (!serverListResponse.ok) throw new Error('Could not fetch radio server list.');
+            const masterServerListUrls = [
+                'https://de1.api.radio-browser.info/json/servers',
+                'https://fr1.api.radio-browser.info/json/servers',
+                'https://nl1.api.radio-browser.info/json/servers',
+                'https://de2.api.radio-browser.info/json/servers',
+            ].sort(() => Math.random() - 0.5);
+
+            let servers: { name: string }[] | null = null;
+            for (const url of masterServerListUrls) {
+                try {
+                    const serverListResponse = await fetch(url, { signal: AbortSignal.timeout(3000) });
+                    if (serverListResponse.ok) {
+                        const data = await serverListResponse.json();
+                        if (Array.isArray(data) && data.length > 0) {
+                            servers = data;
+                            logger.log(`Successfully fetched server list from: ${url}`);
+                            break;
+                        }
+                    }
+                } catch (e) {
+                    logger.log(`Failed to fetch server list from ${url}, trying next...`);
+                }
+            }
+            
+            if (!servers || servers.length === 0) {
+                throw new Error('Could not fetch radio server list from any master server.');
+            }
+
+            const shuffledServers = servers.sort(() => Math.random() - 0.5);
+            let searchSuccess = false;
+
+            for (const server of shuffledServers) {
+                const baseUrl = `https://${server.name}/json`;
+                const searchUrl = `${baseUrl}/stations/byname/${encodeURIComponent(term)}?limit=50&hidebroken=true&order=clickcount&reverse=true`;
                 
-                const servers: { name: string }[] = await serverListResponse.json();
-                if (servers && servers.length > 0) {
-                    // Pick a random server and construct the base URL
-                    const randomServer = servers[Math.floor(Math.random() * servers.length)];
-                    const baseUrl = `https://${randomServer.name}/json`;
-                    logger.log(`Discovered and using radio API server: ${baseUrl}`);
+                try {
+                    const response = await fetch(searchUrl, { signal: AbortSignal.timeout(5000) });
+                    if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
+
+                    const results: RadioBrowserStation[] = await response.json();
+                    if (!Array.isArray(results)) throw new Error("API did not return a valid list of stations.");
+                    
+                    setRadioStations(results);
                     radioApiBaseUrlRef.current = baseUrl;
-                } else {
-                    throw new Error('No available radio servers found.');
+                    searchSuccess = true;
+                    break;
+                } catch (err) {
+                    const message = err instanceof Error ? err.message : 'An unknown error occurred.';
+                    logger.log(`Search on ${baseUrl} failed: ${message}. Trying next server...`);
                 }
             }
 
-            // Step 2: Perform the search using the discovered server
-            const url = `${radioApiBaseUrlRef.current}/stations/byname/${encodeURIComponent(term)}?limit=50&hidebroken=true&order=clickcount&reverse=true`;
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
-
-            const results: RadioBrowserStation[] = await response.json();
-            if (!Array.isArray(results)) {
-                logger.log(`Unexpected radio API response: ${JSON.stringify(results)}`);
-                throw new Error("API did not return a valid list of stations.");
+            if (!searchSuccess) {
+                throw new Error("All available radio servers failed to respond.");
             }
-            setRadioStations(results);
+
         } catch (err) {
             const message = err instanceof Error ? err.message : 'An unknown error occurred.';
             logger.log(`Could not fetch radio stations: ${message}`);
-            setRadioError(`Could not fetch stations: ${message}`);
-            // If server discovery fails, clear the ref so we try again next time
+            setRadioError("Could not fetch stations. The public radio API may be temporarily down. Please try again later.");
             radioApiBaseUrlRef.current = null;
         } finally {
             setIsRadioLoading(false);
@@ -1119,8 +1375,6 @@ const App: React.FC = () => {
     
     const handleMusicSourceChange = useCallback((source: 'default' | 'radio' | 'saved') => {
         setMusicSource(source);
-        // If switching to the 'radio' tab and the station list is empty,
-        // automatically perform a search to populate it for the user.
         if (source === 'radio' && radioStations.length === 0) {
             const termToSearch = radioSearchTerm || 'hits';
             if (!radioSearchTerm) {
@@ -1147,14 +1401,59 @@ const App: React.FC = () => {
     setIsHowToPlayOpen(true);
   };
   
+  const handleConfirmScreenName = (name: string) => {
+    const newSettings: BusStopSettings = {
+      chatterName: name,
+      autoRefreshOnClose: true,
+      autoRefreshInterval: 5,
+      notificationsOn: true,
+      notifyOnMention: true,
+      notifyOnNewActivity: false,
+      notificationSoundOn: true,
+      mutedUsers: []
+    };
+    try {
+        localStorage.setItem('snakeBusStopSettings', JSON.stringify(newSettings));
+    } catch (e) {
+        console.error("Failed to save bus stop settings to localStorage", e);
+    }
+    setBusStopSettings(newSettings);
+    setIsSetScreenNameModalOpen(false);
+    setIsBusStopChatOpen(true);
+  };
+
+  const handleContinueToChat = () => {
+    setIsBusStopOpen(false);
+    if (busStopSettings?.chatterName && piUser) {
+        setIsBusStopChatOpen(true);
+    } else if (piUser) {
+        setIsSetScreenNameModalOpen(true);
+    } else {
+        requestPiAuth('link-device', () => {
+            setIsSetScreenNameModalOpen(true);
+        });
+    }
+  };
+
+  const handleOpenBusStop = () => {
+    if (piUser && busStopSettings?.chatterName) {
+        setIsBusStopChatOpen(true);
+    } else {
+        setIsBusStopOpen(true);
+    }
+  };
+  
   useEffect(() => {
     if (gameState === 'Playing' && !isPaused && !isCrashing) {
         let speedMultiplier = 1.0;
-        if (activeEffects.some(e => e.type === FruitType.SPEED_BOOST)) speedMultiplier = 0.5;
+        if (activeEffects.some(e => e.type === FruitType.SPEED_BOOST)) {
+            speedMultiplier = 1 / gameConfigRef.current!.speedBoostFactor;
+        }
         const newGameSpeed = Math.max(50, baseGameSpeed * speedMultiplier);
         setGameSpeed(newGameSpeed);
         const currentSpeedMps = 1000 / newGameSpeed;
         if (currentSpeedMps > topSpeedRef.current) setTopSpeed(currentSpeedMps);
+        setCurrentLifeStats(prev => ({ ...prev, topSpeed: Math.max(prev.topSpeed, currentSpeedMps) }));
     }
   }, [gameState, isPaused, activeEffects, baseGameSpeed, isCrashing]);
 
@@ -1219,7 +1518,6 @@ const App: React.FC = () => {
                     for(let i = 0; i < config.streetFruitBucketExtraLifeCount; i++) newBucketContents.push(FruitType.EXTRA_LIFE);
                 }
                 
-                // Shuffle the bucket
                 for (let i = newBucketContents.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
                     [newBucketContents[i], newBucketContents[j]] = [newBucketContents[j], newBucketContents[i]];
@@ -1228,7 +1526,7 @@ const App: React.FC = () => {
             }
 
             const newType = bucket.pop()!;
-            setStreetFruitBucket(bucket); // Update state for next spawn
+            setStreetFruitBucket(bucket);
 
             setFruits(prev => [...prev, { id: Date.now(), type: newType, position: newPos, spawnTime: performance.now() }]);
             boardRef.current?.triggerLightEvent('passageFruitSpawned', { fruitType: newType });
@@ -1248,19 +1546,14 @@ const App: React.FC = () => {
     };
   }, [gameState, isPaused, gameConfig]);
 
-  // This effect ensures the lighting for the initial passage fruit is triggered,
-  // both at the start of a new game and after respawning.
   useEffect(() => {
-    // We want this to run when we enter a playable state.
-    // This happens at the start of a new game, or after respawning (when isCrashing becomes false).
     if (gameState === 'Playing' && !isPaused && !isCrashing) {
-      const passageFruit = fruitsRef.current.find(f => FRUIT_CATEGORIES[f.type] === 'PASSAGE');
-      if (passageFruit) {
-        // Ensure its light effect is triggered, as getInitialFruits doesn't have access to the boardRef.
-        boardRef.current?.triggerLightEvent('passageFruitSpawned', { fruitType: passageFruit.type });
-      }
+        const passageFruit = fruitsRef.current.find(f => FRUIT_CATEGORIES[f.type] === 'PASSAGE');
+        if (passageFruit) {
+            boardRef.current?.triggerLightEvent('passageFruitSpawned', { fruitType: passageFruit.type });
+        }
     }
-  }, [gameState, isPaused, isCrashing, gameId]); // isCrashing is the key to fixing the respawn bug.
+  }, [gameState, isPaused, isCrashing, gameId]);
 
   const gameTick = useCallback(() => {
     const { segments: prevSegments, rotation: prevRotation } = snakeRef.current;
@@ -1285,23 +1578,30 @@ const App: React.FC = () => {
         const { pos, rot } = getPortalEmergence(enteredPortal, layoutDetailsRef.current!.portals);
         newHead = pos; 
         nextRotation = rot;
-        setVisualRotation(rot); // FIX: Sync the camera's visual rotation with the snake's new physical rotation.
+        setVisualRotation(rot);
         
         const exitPortal = layoutDetailsRef.current!.portals.find(p => p.type === enteredPortal.type && p.id !== enteredPortal.id)!;
         const exitPortalPos = getPortalAbsolutePosition(exitPortal);
         boardRef.current?.triggerLightEvent('portalWake', { position: exitPortalPos, portalType: exitPortal.type });
+        setCurrentLifeStats(prev => ({ ...prev, portalsEntered: prev.portalsEntered + 1 }));
     }
 
     const wasInPassage = isStreetPassageBlock(head.x, head.z, layoutDetailsRef.current!.street);
     const isInPassage = isStreetPassageBlock(newHead.x, newHead.z, layoutDetailsRef.current!.street);
     if (wasInPassage && !isInPassage) {
         boardRef.current?.triggerLightEvent('snakeExitedPassage', {});
+        setCurrentLifeStats(prev => ({ ...prev, successfulPassages: prev.successfulPassages + 1 }));
     }
+    
+    while (nextRotation > Math.PI) nextRotation -= 2 * Math.PI;
+    while (nextRotation <= -Math.PI) nextRotation += 2 * Math.PI;
 
     if (isWall(newHead, layoutDetailsRef.current!) || prevSegments.slice(1).some(s => s.x === newHead.x && s.z === newHead.z)) {
         handleCrash(newHead, nextRotation); 
         return;
     }
+    
+    setCareerStats(prev => prev ? ({ ...prev, totalDistanceTravelled: prev.totalDistanceTravelled + prevSegments.length }) : prev);
     
     const isMagnetActive = activeEffectsRef.current.some(e => e.type === FruitType.MAGNET);
     const eatenFruits = fruitsRef.current.filter(f => isMagnetActive ? Math.abs(f.position.x - newHead.x) <= 1 && Math.abs(f.position.z - newHead.z) <= 1 : f.position.x === newHead.x && f.position.z === newHead.z);
@@ -1312,8 +1612,10 @@ const App: React.FC = () => {
         const eatenIds = new Set(eatenFruits.map(f => f.id));
         const isDoublerActive = activeEffectsRef.current.some(e => e.type === FruitType.SCORE_DOUBLER);
         const isTripleActive = activeEffectsRef.current.some(e => e.type === FruitType.TRIPLE);
+        const newNodesCollected: NodeCollection = {};
 
         eatenFruits.forEach(fruit => {
+            newNodesCollected[fruit.type] = (newNodesCollected[fruit.type] || 0) + 1;
             boardRef.current?.triggerLightEvent('fruitEaten', {
                 position: fruit.position,
                 fruitType: fruit.type,
@@ -1321,6 +1623,14 @@ const App: React.FC = () => {
                 isTripleActive: isTripleActive,
                 isMagnetActive: isMagnetActive,
             });
+        });
+        setCurrentLifeStats(prev => {
+            const mergedNodes: NodeCollection = { ...prev.nodesCollected };
+            for(const key in newNodesCollected) {
+                const fruitType = key as unknown as FruitType;
+                mergedNodes[fruitType] = (mergedNodes[fruitType] || 0) + newNodesCollected[fruitType]!;
+            }
+            return { ...prev, nodesCollected: mergedNodes };
         });
 
         const eatenAppleCount = eatenFruits.filter(f => f.type === FruitType.APPLE).length;
@@ -1345,12 +1655,10 @@ const App: React.FC = () => {
             
             setBaseGameSpeed(gs => {
               const currentSpeedMps = 1000 / gs;
-              // Re-interpret speedIncreasePerApple to provide a linear increase in speed (m/s).
-              // A config value of 1 now means a 0.2 m/s increase per apple.
               const speedIncreaseMps = (gameConfigRef.current!.speedIncreasePerApple / 5) * eatenAppleCount;
               const newSpeedMps = currentSpeedMps + speedIncreaseMps;
               const newInterval = 1000 / newSpeedMps;
-              return Math.max(50, newInterval); // Ensure interval doesn't go below 50ms
+              return Math.max(50, newInterval);
             });
         }
         
@@ -1389,6 +1697,7 @@ const App: React.FC = () => {
         });
         
         if (points > 0) {
+            setLifeScore(ls => ls + points);
             setScore(s => { 
                 const newS = s + points; 
                 if (Math.floor(newS / gameConfigRef.current!.pointsPerLevel) > Math.floor(s / gameConfigRef.current!.pointsPerLevel)) { 
@@ -1414,8 +1723,6 @@ const App: React.FC = () => {
         
         let nextFruits = fruitsRef.current.filter(f => !eatenIds.has(f.id));
         if (eatenAppleCount > 0) {
-            // The snake is about to grow, so its next state will include the new head and all current segments.
-            // We must check for collisions against this future state to prevent spawning an apple inside the new head.
             const futureSnake = [newHead, ...snakeRef.current.segments];
             for (let i = 0; i < eatenAppleCount; i++) { 
                 const p = getBoardSpawnPoint(futureSnake, nextFruits, layoutDetailsRef.current!); 
@@ -1424,7 +1731,6 @@ const App: React.FC = () => {
         }
         setFruits(nextFruits);
 
-        // Turn off searchlights if a passage fruit was eaten.
         const eatenPassageFruit = eatenFruits.some(f => FRUIT_CATEGORIES[f.type] === 'PASSAGE');
         if (eatenPassageFruit) {
             setIsPassageFruitActive(false);
@@ -1435,7 +1741,6 @@ const App: React.FC = () => {
     if (shouldGrow.current > 0) shouldGrow.current--;
   }, [handleCrash]);
 
-  // Main Game Loop using requestAnimationFrame for smoothness
   useEffect(() => {
     if (gameState !== 'Playing' || isPaused || isCrashing) {
         if (animationFrameRef.current) {
@@ -1455,7 +1760,6 @@ const App: React.FC = () => {
 
         const currentInterval = gameSpeedRef.current;
 
-        // Use a while loop to catch up on missed ticks if the browser lags
         while (timeSinceLastTick >= currentInterval) {
             gameTick();
             timeSinceLastTick -= currentInterval;
@@ -1464,7 +1768,6 @@ const App: React.FC = () => {
         animationFrameRef.current = requestAnimationFrame(animationLoop);
     };
 
-    // Reset timers and start the loop
     lastFrameTime = performance.now();
     timeSinceLastTick = 0;
     animationFrameRef.current = requestAnimationFrame(animationLoop);
@@ -1490,67 +1793,126 @@ const App: React.FC = () => {
   }, [gameState, handleTurn, isPaused, handleTogglePause, isCrashing]);
   
   const handlePointerDown = (e: React.PointerEvent<HTMLElement>) => {
+    if (isAnyUIOverlayOpen) return;
+    
+    const target = e.target as HTMLElement;
+    if (target.closest('button, a, input, textarea')) return;
+
+    e.preventDefault();
+      
     const isOrbitInteractable = cameraView === CameraView.ORBIT && isExpanded && !isHudContentVisible;
     if (isOrbitInteractable) {
         setIsOrbitDragging(true);
         pointerStartPos.current = { x: e.clientX, y: e.clientY };
         (e.target as HTMLElement).setPointerCapture(e.pointerId);
-        e.preventDefault();
         return;
     }
 
-    if (isPiBrowser || gameState !== 'Playing' || isPaused || isCrashing || (e.target as HTMLElement).closest('button')) return;
     pointerStartPos.current = { x: e.clientX, y: e.clientY };
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    e.preventDefault();
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLElement>) => {
+    if (isAnyUIOverlayOpen) return;
     if (isOrbitDragging && pointerStartPos.current) {
-        const deltaX = e.clientX - pointerStartPos.current.x;
-        boardRef.current?.handleOrbitDrag(deltaX);
-        pointerStartPos.current.x = e.clientX; // Update for next move event
+        const dragDelta = isRotated ? (e.clientY - pointerStartPos.current.y) : (e.clientX - pointerStartPos.current.x);
+        boardRef.current?.handleOrbitDrag(dragDelta);
+        pointerStartPos.current.x = e.clientX;
+        pointerStartPos.current.y = e.clientY;
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLElement>) => {
-    if (isOrbitDragging) {
+    if (isAnyUIOverlayOpen) {
+        if (pointerStartPos.current) {
+            (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+            pointerStartPos.current = null;
+            setIsOrbitDragging(false);
+        }
+        return;
+    }
+
+    const wasOrbitDragging = isOrbitDragging;
+    if (wasOrbitDragging) {
         setIsOrbitDragging(false);
-        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    }
+    if (!pointerStartPos.current) return;
+    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    
+    const deltaX = e.clientX - pointerStartPos.current.x;
+    const deltaY = e.clientY - pointerStartPos.current.y;
+    const swipeThreshold = 50;
+    const tapThreshold = 10;
+
+    if (Math.abs(deltaX) < tapThreshold && Math.abs(deltaY) < tapThreshold) {
         pointerStartPos.current = null;
         return;
     }
 
-    if (isPiBrowser || !pointerStartPos.current || gameState !== 'Playing' || isPaused || isCrashing) return;
-    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
-    const deltaX = e.clientX - pointerStartPos.current.x;
     pointerStartPos.current = null;
-    if (Math.abs(deltaX) > 30) handleTurn(deltaX > 0 ? 'right' : 'left');
+
+    if (isMobile() && isExpanded) {
+      if (isRotated) {
+        if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > swipeThreshold) {
+          if (deltaX < 0 && isHudContentVisible) { setIsHudContentVisible(false); return; }
+          if (deltaX > 0 && !isHudContentVisible) { setIsHudContentVisible(true); return; }
+        }
+      } else {
+        if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > swipeThreshold) {
+          if (deltaY < 0 && isHudContentVisible) { setIsHudContentVisible(false); return; }
+          if (deltaY > 0 && !isHudContentVisible) { setIsHudContentVisible(true); return; }
+        }
+      }
+    }
+    
+    if (wasOrbitDragging) return;
+
+    const effectiveDeltaX = isRotated ? deltaY : deltaX;
+    const effectiveDeltaY = isRotated ? -deltaX : deltaY;
+    if (gameState !== 'Playing' || isPaused || isCrashing) return;
+    if (Math.abs(effectiveDeltaX) > Math.abs(effectiveDeltaY) && Math.abs(effectiveDeltaX) > 30) {
+        handleTurn(effectiveDeltaX > 0 ? 'right' : 'left');
+    }
   };
 
   const passageFruitLocation = fruits.find(f => FRUIT_CATEGORIES[f.type] === 'PASSAGE')?.position || null;
 
   if (gameState === 'Loading') {
       return (
-          <div className="w-screen h-screen bg-neutral-900 flex flex-col items-center justify-center text-white font-sans">
+          <div className="w-full h-full bg-neutral-900 flex flex-col items-center justify-center text-white font-sans">
               <SpinnerIcon className="w-16 h-16 animate-spin text-cyan-400" />
               <p className="mt-4 text-2xl font-bold tracking-widest">LOADING...</p>
           </div>
       );
   }
 
+  const isPlayingAndNotPaused = gameState === 'Playing' && !isPaused && !isCrashing;
+  const isOrbitInteractable = cameraView === CameraView.ORBIT && isExpanded && !isHudContentVisible;
+  const shouldPreventTouchScroll = !isAnyUIOverlayOpen && (isPlayingAndNotPaused || isOrbitInteractable);
+
   return (
     <main 
       ref={mainRef} tabIndex={-1}
-      className={`relative bg-neutral-800 text-white overflow-hidden font-sans touch-none outline-none ${isRotated ? 'pi-browser-rotated' : 'h-screen w-screen'}`}
+      className={`relative bg-neutral-800 text-white overflow-hidden font-sans outline-none ${isRotated ? 'pi-browser-rotated' : 'w-full h-full'} ${shouldPreventTouchScroll ? 'touch-none' : ''}`}
       onPointerDown={handlePointerDown} onPointerUp={handlePointerUp} onPointerMove={handlePointerMove}
     >
+      <div aria-live="polite" aria-atomic="true" className="fixed top-4 right-4 z-[100] w-full max-w-sm space-y-2">
+          {notifications.map(notification => (
+              <div key={notification.id} className="p-3 rounded-lg shadow-lg text-white animate-notification" style={{ backgroundColor: notification.type === 'mention' ? 'rgba(255, 51, 204, 0.8)' : 'rgba(0, 255, 255, 0.8)', backdropFilter: 'blur(10px)' }}>
+                  <p className="font-bold text-sm">{notification.type === 'mention' ? 'New Mention!' : 'New Message'}</p>
+                  <p className="text-sm">{notification.message}</p>
+              </div>
+          ))}
+      </div>
       <GameHUD
         gameState={gameState} isPaused={isPaused} onTogglePause={handleTogglePause} isFullScreen={isFullScreen} onToggleFullScreen={handleToggleFullScreen}
         score={score} level={level} lives={lives} gameSpeed={gameSpeed} onStartGame={handleStartGame}
         highScore={highScore} topSpeed={topSpeed} isWelcomePanelVisible={isWelcomePanelVisible}
         activeEffects={activeEffects} onOpenLeaderboard={() => setIsLeaderboardOpen(true)}
-        onOpenSettings={handleOpenSettings}
+        onOpenSettings={() => {
+            setIsSettingsFromMenu(false);
+            handleOpenSettings();
+        }}
         onOpenGraphicsSettings={() => setIsGraphicsSettingsOpen(true)}
         onOpenAmi={handleOpenAmi}
         onOpenHowToPlay={handleOpenHowToPlay}
@@ -1564,102 +1926,111 @@ const App: React.FC = () => {
         setIsHudContentVisible={setIsHudContentVisible}
         onResetToWelcome={handleResetToWelcome}
         onOpenFeedback={() => setIsFeedbackOpen(true)}
+        onOpenWhatsNew={() => setIsWhatsNewOpen(true)}
         onOpenJoinPi={() => setIsJoinPiOpen(true)}
-        onOpenAboutSpi={() => setIsAboutSpiOpen(true)}
         onOpenCredits={() => setIsCreditsOpen(true)}
         onOpenTerms={() => setIsTermsOpen(true)}
         onOpenPrivacyPolicy={() => setIsPrivacyPolicyOpen(true)}
         piUser={piUser}
+        requestPiAuth={requestPiAuth}
         isPiBrowser={isPiBrowser}
+        isFullScreenSupported={isFullScreenSupported}
         isRotated={isRotated}
         onToggleRotate={handleToggleRotate}
         isSettingsOpen={isSettingsOpen}
         isGameOverHudVisible={isGameOverHudVisible}
-        onOpenLinkDevice={() => setIsLinkDeviceModalOpen(true)}
-        onOpenEnterCode={() => setIsEnterCodeModalOpen(true)}
+        onOpenLinkDevice={onOpenLinkDevice}
+        onOpenEnterCode={onOpenEnterCode}
         showMusicPulse={showMusicPulse}
         showCameraPulse={showCameraPulse}
-        requestPiAuth={requestPiAuth}
+        isThirdPersonSettingsOpen={isThirdPersonSettingsOpen}
+        onToggleThirdPersonSettings={() => setIsThirdPersonSettingsOpen(p => !p)}
+        thirdPersonCameraSettings={thirdPersonCameraSettings}
+        onThirdPersonCameraSettingsChange={setThirdPersonCameraSettings}
+        isMenuOpen={isMenuOpen}
+        setIsMenuOpen={setIsMenuOpen}
+        onOpenBusStop={handleOpenBusStop}
       />
-      <div className="absolute inset-0 flex items-center justify-center">
-        {layoutDetails && (
-          <Board 
-            ref={boardRef}
-            gameState={gameState} zoom={zoom} cameraView={cameraView} snakeSegments={snake.segments} snakeRotation={snake.rotation}
-            fruits={fruits} gameSpeed={gameSpeed} layoutDetails={layoutDetails} isCrashing={isCrashing}
-            isPassageFruitActive={isPassageFruitActive} passageFruitLocation={passageFruitLocation}
-            approvedAds={approvedAds}
-            billboardData={billboardData}
-            graphicsQuality={graphicsQuality}
-            isPageVisible={isPageVisible}
-            visualRotation={visualRotation}
-            isPaused={isPaused}
-            weather={weather}
-            score={score}
-            level={level}
-            activeEffects={activeEffects}
-            crashOutcome={crashOutcome}
-            onCrashAnimationComplete={handleCrashAnimationComplete}
-            onGameOverAnimationComplete={handleGameOverAnimationComplete}
-            nextSnake={nextSnake}
-            lastGameplayView={lastGameplayView}
-            clearingFruits={clearingFruits}
-            isOrbitDragging={isOrbitDragging}
-          />
-        )}
-      </div>
-      <Controls 
-        onTurnLeft={() => handleTurn('left')} 
-        onTurnRight={() => handleTurn('right')} 
-        gameState={gameState} 
-        activeKey={activeKey} 
-        isPaused={isPaused} 
-        isHudVisible={isHudContentVisible}
+      <Board
+        ref={boardRef} gameState={gameState} zoom={zoom} cameraView={cameraView} lastGameplayView={lastGameplayView}
+        snakeSegments={snake.segments} snakeRotation={snake.rotation} visualRotation={visualRotation}
+        fruits={fruits} clearingFruits={clearingFruits} gameSpeed={gameSpeed}
+        layoutDetails={layoutDetails!} isCrashing={isCrashing} isPaused={isPaused}
+        isPassageFruitActive={isPassageFruitActive}
+        passageFruitLocation={passageFruitLocation}
+        approvedAds={approvedAds} billboardData={billboardData}
+        graphicsQuality={graphicsQuality} isPageVisible={isPageVisible}
+        weather={weather} score={score} level={level}
+        activeEffects={activeEffects}
+        crashOutcome={crashOutcome}
+        onCrashAscendAnimationComplete={handleCrashAscendAnimationComplete}
+        onGameOverAnimationComplete={handleGameOverAnimationComplete}
+        nextSnake={nextSnake}
+        isOrbitDragging={isOrbitDragging}
+        thirdPersonCameraSettings={thirdPersonCameraSettings}
+        isAnyModalOpen={shouldPauseAnimation}
+        isDynamicLightingDisabled={activeDynamicLightingDisabled}
       />
-      {isAmiOpen && <AdvertisingOverlay onClose={() => setIsAmiOpen(false)} approvedAds={approvedAds} gameConfig={gameConfig} promoCodes={promoCodes} onOpenTerms={() => setIsTermsOpen(true)} requestPiAuth={requestPiAuth} piUser={piUser} isRotated={isRotated} />}
+      <Controls onTurnLeft={() => handleTurn('left')} onTurnRight={() => handleTurn('right')} gameState={gameState} activeKey={activeKey} isPaused={isPaused} isHudVisible={isHudContentVisible} />
+      
+      {isAmiOpen && gameConfig && <AdvertisingOverlay onClose={() => setIsAmiOpen(false)} approvedAds={approvedAds} gameConfig={gameConfig} promoCodes={promoCodes} onOpenTerms={() => setIsTermsOpen(true)} requestPiAuth={requestPiAuth} piUser={piUser} isRotated={isRotated} onOpenExternalUrl={handleOpenExternalUrl} isPiBrowser={isPiBrowser} />}
       {isLeaderboardOpen && <Leaderboard onClose={() => setIsLeaderboardOpen(false)} onLeaderboardUpdate={handleLeaderboardUpdate} isRotated={isRotated} />}
-      {isSubmitScoreOpen && lastGameData && submissionDetails && <SubmitScore scoreData={lastGameData} onClose={() => setIsSubmitScoreOpen(false)} requestPiAuth={requestPiAuth} isRotated={isRotated} submissionDetails={submissionDetails} />}
+      {isSubmitScoreOpen && lastGameData && submissionDetails && <SubmitScore onClose={() => setIsSubmitScoreOpen(false)} scoreData={lastGameData} requestPiAuth={requestPiAuth} isRotated={isRotated} submissionDetails={submissionDetails} piUser={piUser} />}
+      {isSettingsOpen && <Settings onClose={() => setIsSettingsOpen(false)} musicSource={musicSource} onMusicSourceChange={handleMusicSourceChange} currentStation={currentStation} onStationSelect={handleStationSelect} radioSearchTerm={radioSearchTerm} onRadioSearchTermChange={setRadioSearchTerm} radioStations={radioStations} isRadioLoading={isRadioLoading} radioError={radioError} searchRadioStations={searchRadioStations} isRotated={isRotated} isBackgroundPlayEnabled={isBackgroundPlayEnabled} onIsBackgroundPlayEnabledChange={setIsBackgroundPlayEnabled} savedStations={savedStations} onToggleSaveStation={handleToggleSaveStation} showBackdrop={isSettingsFromMenu} radioPlaybackError={radioPlaybackError} onClearRadioPlaybackError={() => setRadioPlaybackError(null)} />}
+      {isGraphicsSettingsOpen && <GraphicsSettings onClose={() => setIsGraphicsSettingsOpen(false)} currentQuality={graphicsQuality} onQualityChange={handleGraphicsQualityChange} isRotated={isRotated} isDynamicLightingDisabled={isLowQualityLightingDisabledPref} onDynamicLightingChange={handleLowQualityLightingPrefChange} />}
       {isHowToPlayOpen && <HowToPlayOverlay onClose={() => setIsHowToPlayOpen(false)} isRotated={isRotated} showBackdrop={showHowToPlayBackdrop} />}
       {isFeedbackOpen && <FeedbackOverlay onClose={() => setIsFeedbackOpen(false)} isRotated={isRotated} />}
-      {isJoinPiOpen && <JoinPiOverlay onClose={() => setIsJoinPiOpen(false)} isRotated={isRotated} />}
-      {isAboutSpiOpen && <AboutSpiOverlay onClose={() => setIsAboutSpiOpen(false)} isRotated={isRotated} />}
-      {isCreditsOpen && <CreditsOverlay onClose={() => setIsCreditsOpen(false)} isRotated={isRotated} />}
+      {isWhatsNewOpen && <WhatsNewOverlay onClose={() => setIsWhatsNewOpen(false)} isRotated={isRotated} piUser={piUser} requestPiAuth={requestPiAuth} />}
+      {isJoinPiOpen && <JoinPiOverlay onClose={() => setIsJoinPiOpen(false)} isRotated={isRotated} onOpenExternalUrl={handleOpenExternalUrl} />}
+      {isCreditsOpen && <CreditsOverlay onClose={() => setIsCreditsOpen(false)} isRotated={isRotated} onOpenExternalUrl={handleOpenExternalUrl} />}
       {isTermsOpen && <TermsAndConditionsOverlay onClose={() => setIsTermsOpen(false)} isRotated={isRotated} />}
-      {isPrivacyPolicyOpen && <PrivacyPolicyOverlay onClose={() => setIsPrivacyPolicyOpen(false)} isRotated={isRotated} />}
-      {isPiAuthModalOpen && <PiAuthModal onClose={() => setIsPiAuthModalOpen(false)} onSuccess={() => { setIsPiAuthModalOpen(false); onAuthSuccessCallback?.(); }} isRotated={isRotated} />}
+      {isPrivacyPolicyOpen && <PrivacyPolicyOverlay onClose={() => setIsPrivacyPolicyOpen(false)} isRotated={isRotated} onOpenExternalUrl={handleOpenExternalUrl} />}
+      {isPiAuthModalOpen && <PiAuthModal onClose={() => setIsPiAuthModalOpen(false)} onSuccess={() => { setIsPiAuthModalOpen(false); if (onAuthSuccessCallback) { onAuthSuccessCallback(); setOnAuthSuccessCallback(null); } }} isRotated={isRotated} />}
       {nonPiBrowserAction && <NonPiBrowserModal action={nonPiBrowserAction} onClose={() => setNonPiBrowserAction(null)} isRotated={isRotated} />}
       {isLinkDeviceModalOpen && <LinkDeviceModal onClose={() => setIsLinkDeviceModalOpen(false)} isRotated={isRotated} />}
-      {isEnterCodeModalOpen && <EnterCodeModal onClose={() => setIsEnterCodeModalOpen(false)} onSuccess={() => { setIsEnterCodeModalOpen(false); setFlashMessage("Account linked!"); }} isRotated={isRotated} />}
-      {isGraphicsSettingsOpen && (
-          <GraphicsSettings 
-              onClose={() => setIsGraphicsSettingsOpen(false)}
-              currentQuality={graphicsQuality}
-              onQualityChange={handleGraphicsQualityChange}
-              isRotated={isRotated}
+      {isEnterCodeModalOpen && <EnterCodeModal onClose={() => setIsEnterCodeModalOpen(false)} onSuccess={() => { setFlashMessage('Account linked successfully!'); setIsEnterCodeModalOpen(false); }} isRotated={isRotated} />}
+      {externalLinkToConfirm && <ExternalLinkWarningModal url={externalLinkToConfirm} onClose={() => setExternalLinkToConfirm(null)} onConfirm={() => { piService.openUrl(externalLinkToConfirm); setExternalLinkToConfirm(null); }} isRotated={isRotated} />}
+      {isBusStopOpen && <BusStopOverlay onClose={() => setIsBusStopOpen(false)} isRotated={isRotated} piUser={piUser} isPiBrowser={isPiBrowser} onContinue={handleContinueToChat} onOpenLinkAccount={onOpenEnterCode} onOpenJoinPi={() => setIsJoinPiOpen(true)} onOpenTerms={() => setIsTermsOpen(true)} onOpenPrivacyPolicy={() => setIsPrivacyPolicyOpen(true)} onOpenCommunityGuidelines={() => setIsCommunityGuidelinesOpen(true)} />}
+      {isBusStopChatOpen && piUser && busStopSettings && <BusStopChat onClose={() => setIsBusStopChatOpen(false)} isRotated={isRotated} piUser={piUser} settings={busStopSettings} onSettingsChange={setBusStopSettings} showNotification={showNotification} onOpenCommunityGuidelines={() => setIsCommunityGuidelinesOpen(true)} />}
+      {isSetScreenNameModalOpen && piUser && <SetScreenNameModal onClose={() => setIsSetScreenNameModalOpen(false)} isRotated={isRotated} piUsername={piUser.username} onConfirm={handleConfirmScreenName} />}
+      {isCommunityGuidelinesOpen && <CommunityGuidelinesOverlay onClose={() => setIsCommunityGuidelinesOpen(false)} isRotated={isRotated} />}
+      {isMenuOpen && (
+          <MenuOverlay
+            onClose={() => setIsMenuOpen(false)} isPaused={isPaused} onEndGame={handleResetToWelcome}
+            onOpenHowToPlay={() => { setIsHowToPlayOpen(true); setShowHowToPlayBackdrop(true); }}
+            onOpenSettings={() => { setIsSettingsOpen(true); setIsSettingsFromMenu(true); }}
+            onOpenGraphicsSettings={() => setIsGraphicsSettingsOpen(true)}
+            
+// FIX: Simplified MenuOverlay props. The MenuOverlay component handles closing itself
+// via its `onClose` prop, so explicitly calling `setIsMenuOpen(false)` here was redundant.
+            onOpenFeedback={() => setIsFeedbackOpen(true)}
+            onOpenWhatsNew={() => setIsWhatsNewOpen(true)}
+            onOpenJoinPi={() => setIsJoinPiOpen(true)}
+            onOpenCredits={() => setIsCreditsOpen(true)}
+            onOpenTerms={() => setIsTermsOpen(true)}
+            onOpenPrivacyPolicy={() => setIsPrivacyPolicyOpen(true)}
+            piUser={piUser} isRotated={isRotated} isPiBrowser={isPiBrowser}
+            onOpenLinkDevice={onOpenLinkDevice} onOpenEnterCode={onOpenEnterCode} requestPiAuth={requestPiAuth}
+            onOpenCareerProfile={onOpenCareerProfile}
           />
       )}
-      {isSettingsOpen && (
-          <Settings 
-              onClose={() => setIsSettingsOpen(false)}
-              musicSource={musicSource}
-              onMusicSourceChange={handleMusicSourceChange}
-              currentStation={currentStation}
-              onStationSelect={handleStationSelect}
-              radioSearchTerm={radioSearchTerm}
-              onRadioSearchTermChange={setRadioSearchTerm}
-              radioStations={radioStations}
-              isRadioLoading={isRadioLoading}
-              radioError={radioError}
-              searchRadioStations={searchRadioStations}
-              isRotated={isRotated}
-              isBackgroundPlayEnabled={isBackgroundPlayEnabled}
-              onIsBackgroundPlayEnabledChange={setIsBackgroundPlayEnabled}
-              savedStations={savedStations}
-              onToggleSaveStation={handleToggleSaveStation}
-              showBackdrop={!((isExpanded && !isHudContentVisible))}
-              radioPlaybackError={radioPlaybackError}
-              onClearRadioPlaybackError={() => setRadioPlaybackError(null)}
-          />
+      {isCareerProfileOpen && careerStats && (
+        <CareerProfile
+            onClose={() => setIsCareerProfileOpen(false)}
+            isRotated={isRotated}
+            piUser={piUser}
+            stats={careerStats}
+        />
+      )}
+      {isPostRunDebriefOpen && lastLifeStats && (
+        <PostRunDebrief
+          stats={lastLifeStats}
+          totalScore={score}
+          livesLeft={lives}
+          onContinue={handleContinueFromDebrief}
+          onEndGame={lives > 0 ? handleEndGameFromDebrief : handleFinalizeGame}
+          isRotated={isRotated}
+        />
       )}
     </main>
   );

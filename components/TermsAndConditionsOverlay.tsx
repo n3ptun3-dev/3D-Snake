@@ -15,8 +15,8 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
 
 const TermsAndConditionsOverlay: React.FC<TermsAndConditionsOverlayProps> = ({ onClose, isRotated }) => {
     const containerClasses = isRotated
-        ? 'h-full max-h-2xl w-auto max-w-[90vh]'
-        : 'w-full max-w-2xl max-h-[90dvh]';
+        ? 'h-auto max-h-[95%] w-auto max-w-[90vh]'
+        : 'h-auto w-full max-w-2xl max-h-[90%]';
 
     return (
         <div
@@ -27,7 +27,7 @@ const TermsAndConditionsOverlay: React.FC<TermsAndConditionsOverlayProps> = ({ o
         >
             <div className={`bg-neutral-900/90 border border-neutral-700 rounded-2xl shadow-2xl flex flex-col ${containerClasses}`}>
                 <header className="flex items-center justify-between p-4 border-b border-neutral-700 flex-shrink-0">
-                    <h2 id="terms-title" className="text-xl font-bold text-white">Terms and Conditions for In-Game Advertising</h2>
+                    <h2 id="terms-title" className="text-xl font-bold text-white">Terms and Conditions for 3D Snake</h2>
                     <button
                         onClick={onClose}
                         className="p-2 rounded-full text-neutral-400 hover:bg-white/10 hover:text-white transition-colors"
@@ -62,26 +62,32 @@ const TermsAndConditionsOverlay: React.FC<TermsAndConditionsOverlayProps> = ({ o
                         <p>We reserve the absolute right to review, approve, or reject any submitted Ad for any reason, at our sole discretion, without providing a reason.</p>
                     </Section>
 
-                    <Section title="4. Payment, Transactions, and Refunds">
+                    <Section title="4. User Conduct in &quot;The Bus Stop&quot; Chatroom">
+                        <p>Our game includes a public chatroom, "The Bus Stop". By using the chat, you agree to abide by our Community Guidelines, which are accessible within the application.</p>
+                        <p>You are solely responsible for the content of the messages you post. We do not endorse and are not responsible for any user-generated content in the chat.</p>
+                        <p>We reserve the right, but have no obligation, to monitor the chat and to remove any content or block any user that we determine, in our sole discretion, violates these Terms or the Community Guidelines. Violations may result in temporary or permanent restrictions from using the chat feature.</p>
+                    </Section>
+
+                    <Section title="5. Payment, Transactions, and Refunds">
                         <p>All payments for the Service must be made using the Pi cryptocurrency.</p>
-                        <p>You are responsible for ensuring the payment transaction is sent to the correct wallet address and includes the exact, correct Payment ID (Memo). Failure to do so may result in your payment not being recognized and your Ad not being scheduled.</p>
+                        <p>Payments are handled through the integrated Pi SDK. You must follow the on-screen prompts within the Pi payment flow to complete your transaction. The application will handle the necessary transaction details automatically.</p>
                         <p><strong>All transactions are final and non-refundable.</strong> Due to the nature of cryptocurrency transactions and the automated system, we do not offer refunds for any reason, including but not limited to, rejected ads, ads that run on dates with low player traffic, or your dissatisfaction with the service.</p>
                     </Section>
                     
-                    <Section title="5. Intellectual Property">
+                    <Section title="6. Intellectual Property">
                         <p>You retain ownership of the intellectual property rights in the content you submit. However, by submitting an Ad, you grant us a non-exclusive, worldwide, royalty-free, sublicensable license to use, reproduce, display, and distribute your Ad content within the 3D Snake: Neon Grid Runner game and in promotional materials for the game.</p>
                     </Section>
 
-                    <Section title="6. Limitation of Liability">
+                    <Section title="7. Limitation of Liability">
                         <p>To the fullest extent permitted by law, we shall not be liable for any indirect, incidental, special, consequential, or punitive damages, or any loss of profits or revenues, whether incurred directly or indirectly, or any loss of data, use, goodwill, or other intangible losses, resulting from (a) your access to or use of or inability to access or use the Service; (b) any conduct or content of any third party on the Service; or (c) unauthorized access, use, or alteration of your transmissions or content.</p>
                         <p>We provide no guarantees regarding game uptime, player numbers, or the visibility your Ad will receive.</p>
                     </Section>
 
-                    <Section title="7. Termination">
+                    <Section title="8. Termination">
                         <p>We reserve the right to remove any active Ad at any time, without notice or refund, if we believe it violates these Terms or is otherwise detrimental to the game or its community.</p>
                     </Section>
 
-                    <Section title="8. Changes to Terms">
+                    <Section title="9. Changes to Terms">
                         <p>We may revise these Terms from time to time. The most current version will always be available within the game. By continuing to use the Service after those revisions become effective, you agree to be bound by the revised Terms.</p>
                     </Section>
                 </div>

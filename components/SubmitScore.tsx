@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DeviceType } from '../types';
+import { DeviceType, UserDTO } from '../types';
 import { isMobile } from '../utils/device';
 import { getGeoInfo, submitScore } from '../utils/leaderboard';
 import { SpinnerIcon } from './icons';
@@ -12,20 +12,20 @@ interface SubmitScoreProps {
     topSpeed: number;
   };
   onClose: () => void;
-  requestPiAuth: (intent: 'submit-score' | 'purchase-ad', onSuccess: () => void, data?: any) => void;
+  requestPiAuth: (intent: 'submit-score' | 'purchase-ad' | 'link-device', onSuccess: () => void, data?: any) => void;
   isRotated: boolean;
   submissionDetails: {
     isNewHighScore: boolean;
     qualifiesForLeaderboard: boolean;
   };
+  piUser: UserDTO | null;
 }
 
-const SubmitScore: React.FC<SubmitScoreProps> = ({ scoreData, onClose, requestPiAuth, isRotated, submissionDetails }) => {
+const SubmitScore: React.FC<SubmitScoreProps> = ({ scoreData, onClose, requestPiAuth, isRotated, submissionDetails, piUser }) => {
   const [name, setName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
-  const piUser = piService.getCurrentUser();
   
   const { isNewHighScore, qualifiesForLeaderboard } = submissionDetails;
 
@@ -63,7 +63,7 @@ const SubmitScore: React.FC<SubmitScoreProps> = ({ scoreData, onClose, requestPi
         }
     };
 
-    if (piService.getCurrentUser()) {
+    if (piUser) {
         await performSubmit();
     } else {
         requestPiAuth('submit-score', performSubmit, scoreData);
@@ -71,8 +71,8 @@ const SubmitScore: React.FC<SubmitScoreProps> = ({ scoreData, onClose, requestPi
   };
 
   const containerClasses = isRotated
-    ? 'h-auto max-h-md w-full max-w-[90dvw]'
-    : 'w-full max-w-md max-h-full';
+    ? 'h-auto max-h-[95%] w-full max-w-[90dvw]'
+    : 'w-full max-w-md max-h-[90%]';
 
     // Determine the title and description based on the context
     let title: string;

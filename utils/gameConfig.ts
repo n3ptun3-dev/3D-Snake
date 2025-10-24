@@ -6,11 +6,11 @@ const CONFIG_STORAGE_KEY = 'snakeGameConfig';
 
 export const DEFAULT_CONFIG: GameConfig = {
     // Gameplay
-    initialGameSpeed: 400,
+    initialGameSpeed: 350,
     initialSnakeLength: 3,
     initialLives: 3,
-    speedIncreasePerApple: 1,
-    slowDownEffectValue: 40,
+    speedIncreasePerApple: 1.1,
+    slowDownEffectValue: 30,
     pointsPerLevel: 10,
     // Fruit & Power-ups
     boardFruitSpawnDelay: 12000,
@@ -23,13 +23,14 @@ export const DEFAULT_CONFIG: GameConfig = {
     maxExtraLivesTotal: 3,
     appleScore: 1,
     speedBoostDuration: 5000,
+    speedBoostFactor: 1.5,
     magnetDuration: 10000,
     scoreDoublerDuration: 10000,
     tripleDuration: 10000,
-    slowDownFrequencyMultiplier: 3,
+    slowDownFrequencyMultiplier: 2,
     // New fruit logic config
-    slowDownSpeedThreshold: 4,
-    highSpeedSpeedBoostChance: 0.25,
+    slowDownSpeedThreshold: 5,
+    highSpeedSpeedBoostChance: 0.45,
     streetFruitBucketTripleCount: 3,
     streetFruitBucketExtraLifeCount: 1,
     // Promotions

@@ -70,13 +70,19 @@ To build and run the project on your local machine, follow these steps:
     The setup script created `.env.testnet` and `.env.mainnet` files. Review them and add any missing values, especially for your Firebase project if you have one.
 
 4.  **Build the Project:**
-    You can now build for either the testnet or mainnet environment.
+    You can now build for different environments:
     ```bash
-    # For a testnet build
+    # For local development with dummy Pi data (no Pi Browser needed)
+    npm run build:dummy
+
+    # For a testnet build (requires Pi Testnet)
     npm run build:testnet
 
-    # For a mainnet build
+    # For a mainnet build with sandbox enabled
     npm run build:mainnet
+    
+    # For a live mainnet build (real transactions)
+    npm run build:live
     ```
     This will create a production-ready build in the `/dist` directory.
 

@@ -1,10 +1,10 @@
 import React from 'react';
 import { XIcon } from './icons';
-import { piService } from '../utils/pi';
 
 interface PrivacyPolicyOverlayProps {
     onClose: () => void;
     isRotated: boolean;
+    onOpenExternalUrl: (url: string) => void;
 }
 
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
@@ -14,14 +14,14 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
     </section>
 );
 
-const PrivacyPolicyOverlay: React.FC<PrivacyPolicyOverlayProps> = ({ onClose, isRotated }) => {
+const PrivacyPolicyOverlay: React.FC<PrivacyPolicyOverlayProps> = ({ onClose, isRotated, onOpenExternalUrl }) => {
     const containerClasses = isRotated
-        ? 'h-full max-h-2xl w-auto max-w-[90vh]'
-        : 'w-full max-w-2xl max-h-[90dvh]';
+        ? 'h-auto max-h-[95%] w-auto max-w-[90vh]'
+        : 'h-auto w-full max-w-2xl max-h-[90%]';
         
     const handleLinkClick = (e: React.MouseEvent, url: string) => {
         e.preventDefault();
-        piService.openUrl(url);
+        onOpenExternalUrl(url);
     };
 
     return (
@@ -52,15 +52,15 @@ const PrivacyPolicyOverlay: React.FC<PrivacyPolicyOverlayProps> = ({ onClose, is
                         <p>We collect a very limited amount of information to make the game work and to improve your experience:</p>
                         <ul className="list-disc list-inside pl-4 space-y-1">
                             <li><strong>Leaderboard Data:</strong> If you choose to submit your score to the leaderboard, we collect the name you provide, your score, level, top speed, and your general region (country code). This is voluntary. Your Pi username is used for authentication but is not displayed publicly unless you enter it as your display name.</li>
+                            <li><strong>Bus Stop Chat Data:</strong> When you use The Bus Stop chatroom, we collect your Pi User ID (UID), Pi Username, your chosen public screen name, the content of your messages, a timestamp, and your region. This information is used to display messages and facilitate conversation. Your Pi UID and Username are used for identification and moderation but are not publicly displayed in the chat. Messages are considered public within the chat and are automatically deleted after approximately 24 hours. Your list of muted users is stored only on your local device.</li>
                             <li><strong>Gameplay Analytics:</strong> We use Firebase Analytics to collect anonymous data about gameplay, such as session duration, levels reached, and device type (mobile or computer). This helps us understand how the game is played and where we can make improvements. This data is aggregated and does not personally identify you.</li>
-                            <li><strong>Advertising Data:</strong> If ads are enabled and you provide consent, our advertising partner (InMobi) may collect device identifiers and other data to show you personalized ads. Please refer to their privacy policy for more details.</li>
                         </ul>
                     </Section>
 
                     <Section title="2. How We Use Your Information">
                          <p>We use the information we collect to:</p>
                         <ul className="list-disc list-inside pl-4 space-y-1">
-                            <li>Operate and maintain the game, including displaying leaderboards.</li>
+                            <li>Operate and maintain the game, including displaying leaderboards and chat messages.</li>
                             <li>Improve and optimize the game for all players.</li>
                             <li>Display in-game advertisements from our sponsors.</li>
                             <li>Respond to your feedback and support requests.</li>
@@ -71,21 +71,18 @@ const PrivacyPolicyOverlay: React.FC<PrivacyPolicyOverlayProps> = ({ onClose, is
                         <p>We use the following third-party services:</p>
                         <ul className="list-disc list-inside pl-4 space-y-1">
                             <li><strong>Firebase (Google):</strong> For hosting, analytics, and game configuration. You can view Google's privacy policy <a href="https://policies.google.com/privacy" onClick={(e) => handleLinkClick(e, 'https://policies.google.com/privacy')} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">here</a>.</li>
-                            <li><strong>InMobi:</strong> For serving in-game advertisements. When ads are shown, you will be presented with a consent dialog from InMobi's Consent Management Platform (CMP). This allows you to control your data preferences for advertising. You can review InMobi's privacy policy <a href="https://www.inmobi.com/privacy-policy" onClick={(e) => handleLinkClick(e, 'https://www.inmobi.com/privacy-policy')} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">here</a>.</li>
                             <li><strong>Pi Network SDK:</strong> For authenticating you with your Pi account. We only request access to your username for leaderboard submissions and payments. We do not access any other personal information from your Pi account.</li>
                         </ul>
                     </Section>
 
                     <Section title="4. Advertising">
                         <p>Our game is supported by in-game advertising. When you play, you may see advertisements on billboards, posters, and banners. Some of these are from community members who have purchased ad space using Pi.</p>
-                        <p>We may also feature a post-game video ad provided by InMobi. You have control over the data used for personalized advertising through the consent management window that appears when you first play.</p>
                     </Section>
 
                     <Section title="5. Your Choices & Rights">
                         <ul className="list-disc list-inside pl-4 space-y-1">
-                             <li><strong>Leaderboard:</strong> Submitting your score to the leaderboard is completely optional.</li>
-                            <li><strong>Advertising Consent:</strong> You can manage your consent for personalized advertising through the InMobi CMP window.</li>
-                            <li><strong>Data Access:</strong> Since most of the data we collect is anonymous, it is not possible to provide access to individual user data. For leaderboard removal requests, please contact us.</li>
+                             <li><strong>Leaderboard & Chat:</strong> Submitting your score to the leaderboard and participating in the chat are completely optional.</li>
+                             <li><strong>Data Access:</strong> Since most of the data we collect is anonymous, it is not possible to provide access to individual user data. For leaderboard removal requests, please contact us. Chat messages are automatically deleted and cannot be retrieved.</li>
                         </ul>
                     </Section>
 
@@ -98,7 +95,7 @@ const PrivacyPolicyOverlay: React.FC<PrivacyPolicyOverlayProps> = ({ onClose, is
                     </Section>
 
                     <Section title="8. Contact Us">
-                        <p>If you have any questions about this Privacy Policy, please use the "Feedback" option in the game menu.</p>
+                        <p>If you have any questions about this Privacy Policy, please email us at applantisapps@gmail.com.</p>
                     </Section>
                 </div>
 

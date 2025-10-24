@@ -1,4 +1,3 @@
-
 // --- START OF build.mjs ---
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -13,6 +12,7 @@ const execPromise = promisify(exec);
 // This is now the single source of truth, set by the npm script command.
 if (!process.env.APP_ENV || process.env.PI_SANDBOX === undefined) {
   console.error("❌ ERROR: Build script was likely run directly. Please use the npm scripts in package.json:");
+  console.error("   - 'npm run build:dummy'   (Testnet, Sandbox ON, Dummy Mode ON)");
   console.error("   - 'npm run build:testnet' (Testnet, Sandbox ON)");
   console.error("   - 'npm run build:mainnet' (Mainnet, Sandbox ON)");
   console.error("   - 'npm run build:live'    (Mainnet, Sandbox OFF)");
@@ -21,6 +21,7 @@ if (!process.env.APP_ENV || process.env.PI_SANDBOX === undefined) {
 
 const environment = process.env.APP_ENV;
 const sandboxValueString = process.env.PI_SANDBOX;
+const dummyModeValueString = process.env.DUMMY_MODE || 'false';
 
 console.log(`🚀 Building for environment: ${environment}`);
 
@@ -51,30 +52,53 @@ const parseEnvFile = (filePath) => {
 const envVarsFromFile = parseEnvFile(envFilePath);
 
 const allEnvKeys = [ 'PI_SANDBOX', 'DUMMY_MODE', 'BACKEND_URL', 'FIREBASE_API_KEY', 'FIREBASE_AUTH_DOMAIN', 'FIREBASE_PROJECT_ID', 'FIREBASE_STORAGE_BUCKET', 'FIREBASE_MESSAGING_SENDER_ID', 'FIREBASE_APP_ID', 'FIREBASE_MEASUREMENT_ID' ];
-const defaultTestnetVars = { DUMMY_MODE: 'false' };
 const requiredMainnetKeys = new Set([ 'FIREBASE_API_KEY', 'FIREBASE_AUTH_DOMAIN', 'FIREBASE_PROJECT_ID' ]);
 
 console.log('📦 Defining environment variables for esbuild...');
 const finalEnvVars = {};
 
-// --- Simplified Sandbox Logic ---
+// Handle Pi Sandbox and Dummy Mode directly from process.env set by npm scripts
+finalEnvVars['PI_SANDBOX'] = sandboxValueString;
 if (sandboxValueString === 'false') {
     console.log(`   - 💥 CRITICAL: Building with Sandbox OFF (LIVE MODE).`);
 } else {
     console.log(`   - ✅ Building with Sandbox ON.`);
 }
-finalEnvVars['PI_SANDBOX'] = sandboxValueString;
-// --- End Simplified Logic ---
 
-allEnvKeys.forEach(key => { if (key === 'PI_SANDBOX') return; let value = envVarsFromFile[key]; if (value === undefined && environment === 'testnet') { value = defaultTestnetVars[key]; if (value !== undefined) { console.log(`   - Using testnet default for ${key}: "${value}"`); } } finalEnvVars[key] = value; });
+finalEnvVars['DUMMY_MODE'] = dummyModeValueString;
+if (dummyModeValueString === 'true') {
+    console.log(`   - 🔧 Building with Dummy Mode ON.`);
+}
+
+// Handle other variables, primarily from files
+allEnvKeys.forEach(key => {
+    // Skip keys already handled directly from process.env
+    if (key === 'PI_SANDBOX' || key === 'DUMMY_MODE') return;
+
+    let value = envVarsFromFile[key];
+    finalEnvVars[key] = value;
+});
+
 const defines = {};
-for (const key of allEnvKeys) { let value = finalEnvVars[key]; if (value === undefined || value === '') { if (environment === 'mainnet' && requiredMainnetKeys.has(key)) { console.error(`\n❌ CRITICAL BUILD ERROR: Required environment variable '${key}' is missing from .env.mainnet or is empty.`); console.error("   Please ensure the key exists and has a value.\n"); process.exit(1); } if (value === undefined) { console.log(`   - Key '${key}' not found, using empty string default.`); value = ''; } } defines[`process.env.${key}`] = JSON.stringify(value); }
+for (const key of allEnvKeys) {
+    let value = finalEnvVars[key];
+    if (value === undefined || value === '') {
+        if (environment === 'mainnet' && requiredMainnetKeys.has(key)) {
+            console.error(`\n❌ CRITICAL BUILD ERROR: Required environment variable '${key}' is missing from .env.mainnet or is empty.`);
+            console.error("   Please ensure the key exists and has a value.\n");
+            process.exit(1);
+        }
+        if (value === undefined) {
+            console.log(`   - Key '${key}' not found, using empty string default.`);
+            value = '';
+        }
+    }
+    defines[`process.env.${key}`] = JSON.stringify(value);
+}
 const nodeEnvForLibs = 'production';
 defines['process.env.NODE_ENV'] = JSON.stringify(nodeEnvForLibs);
-
 defines['process.env.APP_ENV'] = JSON.stringify(environment);
 console.log(`   - ✅ Hardcoding APP_ENV: "${environment}"`);
-
 console.log(`   - Injected NODE_ENV for libraries: "${nodeEnvForLibs}"`);
 console.log('✅ Environment variables defined.');
 
@@ -114,13 +138,13 @@ async function build() {
         if (fsSync.existsSync(indexPath)) {
             let indexContent = await fs.readFile(indexPath, 'utf-8');
             
-            const sandboxPlaceholder = `// This value is now dynamically replaced by the build script.
+            const sandboxPlaceholder = `                  // This value is now dynamically replaced by the build script.
                   const isSandbox = true;`;
             const sandboxValueForHtml = finalEnvVars['PI_SANDBOX'] === 'true';
             if (indexContent.includes(sandboxPlaceholder)) {
                 indexContent = indexContent.replace(
                     sandboxPlaceholder,
-                    `// This value is now dynamically replaced by the build script.
+                    `                  // This value is now dynamically replaced by the build script.
                   const isSandbox = ${String(sandboxValueForHtml)};`
                 );
                 console.log(`   - ✅ Injected 'isSandbox = ${String(sandboxValueForHtml)}' into index.html`);

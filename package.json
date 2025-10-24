@@ -8,6 +8,7 @@
     "postinstall": "node setup-local.mjs || exit 0",
     "setup": "node setup-local.mjs",
     "build:testnet": "cross-env APP_ENV=testnet PI_SANDBOX=true node build.mjs",
+    "build:dummy": "cross-env APP_ENV=testnet PI_SANDBOX=true DUMMY_MODE=true node build.mjs",
     "build:mainnet": "cross-env APP_ENV=mainnet PI_SANDBOX=true node build.mjs",
     "build:live": "cross-env APP_ENV=mainnet PI_SANDBOX=false node build.mjs"
   },

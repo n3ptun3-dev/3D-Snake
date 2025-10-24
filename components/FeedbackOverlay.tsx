@@ -106,8 +106,8 @@ const FeedbackOverlay: React.FC<FeedbackOverlayProps> = ({ onClose, isRotated })
     };
 
     const containerClasses = isRotated
-        ? 'h-full max-h-lg w-auto max-w-[90dvw]'
-        : 'w-full max-w-lg max-h-[90dvh]';
+        ? 'h-auto max-h-[95%] w-auto max-w-[90vh]'
+        : 'h-auto w-full max-w-lg max-h-[90%]';
 
     return (
         <div

@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AdType, Sponsor, AdSubmissionData, BookedSlots, ApprovedAd, GameConfig, PromoCode, UserDTO, PaymentDTO } from '../types';
 import { submitAdToArchive, createAdOrder, logAdClick, fetchBookedSlots } from '../utils/sponsors';
-import { XIcon, SpinnerIcon, MegaphoneIcon, CalendarIcon, CopyIcon, ChevronLeftIcon, ChevronRightIcon } from './icons';
+import { XIcon, SpinnerIcon, MegaphoneIcon, CalendarIcon, CopyIcon, ChevronLeftIcon, ChevronRightIcon, WarningIcon } from './icons';
 import HowItWorksOverlay from './HowItWorksOverlay';
 import RedirectingModal from './RedirectingModal';
 import { piService } from '../utils/pi';
 import { DUMMY_MODE, BACKEND_URL } from '../config';
+import NonPiBrowserModal from './NonPiBrowserModal';
 
 interface AdvertisingOverlayProps {
   onClose: () => void;
@@ -16,6 +17,8 @@ interface AdvertisingOverlayProps {
   requestPiAuth: (intent: 'submit-score' | 'purchase-ad', onSuccess: () => void, data?: any) => void;
   piUser: UserDTO | null;
   isRotated: boolean;
+  onOpenExternalUrl: (url: string) => void;
+  isPiBrowser: boolean;
 }
 
 // Helper function to get the correct price from the game config
@@ -123,14 +126,14 @@ const generateFlyerDataUrl = (variant: number): string => {
     return canvas.toDataURL();
 };
 
-const SponsorDetailModal: React.FC<{ sponsor: Sponsor; onClose: () => void; isRotated: boolean; }> = ({ sponsor, onClose, isRotated }) => {
+const SponsorDetailModal: React.FC<{ sponsor: Sponsor; onClose: () => void; isRotated: boolean; onOpenExternalUrl: (url: string) => void; }> = ({ sponsor, onClose, isRotated, onOpenExternalUrl }) => {
     const [isImagePopupOpen, setIsImagePopupOpen] = useState(false);
 
     const handleVisitWebsite = (e: React.MouseEvent) => {
         if (sponsor.websiteUrl && sponsor.websiteUrl !== '#') {
             e.preventDefault();
             logAdClick('Website', sponsor.name);
-            piService.openUrl(sponsor.websiteUrl);
+            onOpenExternalUrl(sponsor.websiteUrl);
         } else {
             e.preventDefault();
         }
@@ -138,7 +141,7 @@ const SponsorDetailModal: React.FC<{ sponsor: Sponsor; onClose: () => void; isRo
     
     const containerClasses = isRotated
         ? 'w-[90%] max-w-md h-auto max-h-[95%]'
-        : 'w-full max-w-md max-h-[90dvh]';
+        : 'w-full max-w-md max-h-[90%]';
 
     return (
         <>
@@ -146,17 +149,22 @@ const SponsorDetailModal: React.FC<{ sponsor: Sponsor; onClose: () => void; isRo
                 <div className={`bg-neutral-900/90 border border-neutral-700 rounded-2xl shadow-2xl flex flex-col ${containerClasses}`} onClick={e => e.stopPropagation()}>
                     <header className="flex items-center justify-between p-4 border-b border-neutral-700 flex-shrink-0">
                         <h2 id="sponsor-detail-title" className="text-xl font-bold text-cyan-300 truncate pr-4">{sponsor.name}</h2>
-                        <button onClick={onClose} className="p-2 rounded-full text-neutral-400 hover:bg-white/10 hover:text-white transition-colors" aria-label="Close">
+                        <button onClick={onClose} className="p-2 rounded-full text-neutral-400 hover:bg-white/10 hover:text-white transition-colors" aria-label="Close sponsor details">
                             <XIcon className="w-6 h-6" />
                         </button>
                     </header>
                     <div className="flex-grow overflow-y-auto p-4 sm:p-6">
-                        <img 
-                          src={sponsor.imageUrl} 
-                          alt={`${sponsor.name} logo`} 
-                          className="w-full h-48 object-contain rounded-md bg-black/20 mb-4 cursor-pointer"
+                        <button
                           onClick={() => setIsImagePopupOpen(true)}
-                        />
+                          aria-label={`Enlarge image for ${sponsor.name}`}
+                          className="w-full h-48 rounded-md bg-black/20 mb-4 cursor-pointer focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                        >
+                            <img 
+                              src={sponsor.imageUrl} 
+                              alt={`${sponsor.name} advertisement`} 
+                              className="w-full h-full object-contain"
+                            />
+                        </button>
                         <p className="text-neutral-300 whitespace-pre-wrap">{sponsor.description}</p>
                     </div>
                     {sponsor.websiteUrl && sponsor.websiteUrl !== '#' && (
@@ -181,13 +189,14 @@ const SponsorDetailModal: React.FC<{ sponsor: Sponsor; onClose: () => void; isRo
 };
 
 
-const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approvedAds, gameConfig, promoCodes, onOpenTerms, requestPiAuth, piUser, isRotated }) => {
+const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approvedAds, gameConfig, promoCodes, onOpenTerms, requestPiAuth, piUser, isRotated, onOpenExternalUrl, isPiBrowser }) => {
     const [view, setView] = useState<'list' | 'select_type' | 'calendar' | 'form' | 'payment' | 'thank_you'>('list');
     const [sponsors, setSponsors] = useState<Sponsor[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [showPromoPopup, setShowPromoPopup] = useState(false);
     const [isHowItWorksOpen, setIsHowItWorksOpen] = useState(false);
+    const [showPiRequiredNotice, setShowPiRequiredNotice] = useState(false);
 
     // State for the submission flow
     const [selectedType, setSelectedType] = useState<AdType | null>(null);
@@ -306,8 +315,17 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
     };
 
     const handleFormSubmit = async (formData: Omit<AdSubmissionData, 'paymentId' | 'scheduleDate' | 'adType' | 'price' | 'originalPrice' | 'piUsername'>) => {
-        if (!selectedType || selectedDates.length === 0 || !piUser || !gameConfig) return;
+        if (!selectedType || selectedDates.length === 0 || !gameConfig) return;
 
+        // Block non-Pi users at the point of submission
+        if (!piUser) {
+            requestPiAuth('purchase-ad', () => {
+                // After auth (which implies switching to Pi Browser), the user will need to click "Pay" again.
+                // The form data is cached, so their progress is not lost.
+            });
+            return;
+        }
+        
         setLoading(true);
         setFormCache(formData);
         
@@ -382,7 +400,7 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
             
             if (piService.isLinked()) {
                 const encodedData = btoa(JSON.stringify(finalData));
-                const deepLink = `pi://browser/d-snake-7a80a.web.app/continue-ad-purchase?data=${encodeURIComponent(encodedData)}`;
+                const deepLink = `pi://browser/d-snake-7a80a.web.app/continue-ad-purchase#data=${encodeURIComponent(encodedData)}`;
                 
                 setIsRedirecting(true);
                 setTimeout(() => {
@@ -438,31 +456,26 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
     };
 
     const handleAdvertiseClick = async () => {
-        const proceed = async () => {
-            setLoading(true);
-            try {
-                const slots = await fetchBookedSlots();
-                setBookedSlots(slots);
-                setView('select_type');
-                
-                // Show "How It Works" on first visit per session.
-                const hasSeen = sessionStorage.getItem('hasSeenAdHowItWorks');
-                if (!hasSeen) {
-                    setIsHowItWorksOpen(true);
-                    sessionStorage.setItem('hasSeenAdHowItWorks', 'true');
-                }
-            } catch (err) {
-                setError("Could not load advertising data. Please try again later.");
-                console.error(err);
-            } finally {
-                setLoading(false);
-            }
-        };
+        if (!isPiBrowser) {
+            setShowPiRequiredNotice(true);
+        }
 
-        if (!piUser) {
-            requestPiAuth('purchase-ad', proceed);
-        } else {
-            await proceed();
+        setLoading(true);
+        try {
+            const slots = await fetchBookedSlots();
+            setBookedSlots(slots);
+            setView('select_type');
+            
+            const hasSeen = sessionStorage.getItem('hasSeenAdHowItWorks');
+            if (!hasSeen) {
+                setIsHowItWorksOpen(true);
+                sessionStorage.setItem('hasSeenAdHowItWorks', 'true');
+            }
+        } catch (err) {
+            setError("Could not load advertising data. Please try again later.");
+            console.error(err);
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -506,7 +519,7 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
 
     const containerClasses = isRotated
         ? 'h-[95%] w-[90%] max-w-[750px]'
-        : 'w-full max-w-2xl h-[90dvh] max-h-[750px]';
+        : 'w-full max-w-2xl h-[90%] max-h-[750px]';
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center font-sans p-4" role="dialog" aria-modal="true">
@@ -526,14 +539,14 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
                                 How It Works
                             </button>
                         )}
-                        <button onClick={onClose} className="p-2 rounded-full text-neutral-400 hover:bg-white/10 hover:text-white transition-colors" aria-label="Close">
+                        <button onClick={onClose} className="p-2 rounded-full text-neutral-400 hover:bg-white/10 hover:text-white transition-colors" aria-label="Close advertising">
                             <XIcon className="w-6 h-6" />
                         </button>
                     </div>
                 </header>
                 <div className="flex-grow overflow-y-auto">
                     {renderContent()}
-                    {selectedSponsor && <SponsorDetailModal sponsor={selectedSponsor} onClose={() => setSelectedSponsor(null)} isRotated={isRotated} />}
+                    {selectedSponsor && <SponsorDetailModal sponsor={selectedSponsor} onClose={() => setSelectedSponsor(null)} isRotated={isRotated} onOpenExternalUrl={onOpenExternalUrl} />}
                 </div>
                 
                 {showPromoPopup && gameConfig?.promoTitle && (
@@ -554,8 +567,15 @@ const AdvertisingOverlay: React.FC<AdvertisingOverlayProps> = ({ onClose, approv
                         </div>
                     </div>
                 )}
-
-                {isHowItWorksOpen && <HowItWorksOverlay onClose={() => setIsHowItWorksOpen(false)} isRotated={isRotated} />}
+                
+                {showPiRequiredNotice && (
+                    <NonPiBrowserModal
+                        action={{ intent: 'purchase-ad' }}
+                        onClose={() => setShowPiRequiredNotice(false)}
+                        isRotated={isRotated}
+                    />
+                )}
+                {isHowItWorksOpen && <HowItWorksOverlay onClose={() => setIsHowItWorksOpen(false)} isRotated={isRotated} onOpenExternalUrl={onOpenExternalUrl} />}
                 {isRedirecting && <RedirectingModal isRotated={isRotated} />}
             </div>
         </div>
@@ -582,17 +602,24 @@ const SponsorList: React.FC<{ sponsors: Sponsor[]; loading: boolean; error: stri
                 {!loading && !error && (
                     <ul className="space-y-3">
                         {sponsors.map(sponsor => (
-                            <li key={sponsor.id} onClick={() => onSponsorClick(sponsor)} className={`p-4 rounded-lg border-l-4 transition-colors cursor-pointer ${getTierStyle(sponsor.adType)}`}>
-                                <div className="flex items-start gap-4">
-                                    <img src={sponsor.imageUrl} alt={`${sponsor.name} logo`} className="w-16 h-16 sm:w-20 sm:h-20 object-cover rounded-md bg-black/20 flex-shrink-0" />
-                                    <div className="flex-grow">
-                                        <div className="flex justify-between items-start">
-                                            <h4 className="font-bold text-white text-base sm:text-lg">{sponsor.name}</h4>
-                                            <span className="text-xs font-semibold uppercase tracking-wider px-2 py-1 rounded-full bg-black/30 text-neutral-300">{sponsor.count && sponsor.count > 1 ? `${sponsor.count}x ` : ''}{sponsor.adType}</span>
+                            <li key={sponsor.id}>
+                                <button
+                                    type="button"
+                                    onClick={() => onSponsorClick(sponsor)}
+                                    aria-label={`View details for ${sponsor.name}`}
+                                    className={`w-full text-left p-4 rounded-lg border-l-4 transition-colors ${getTierStyle(sponsor.adType)}`}
+                                >
+                                    <div className="flex items-start gap-4">
+                                        <img src={sponsor.imageUrl} alt={`${sponsor.name} logo`} className="w-16 h-16 sm:w-20 sm:h-20 object-cover rounded-md bg-black/20 flex-shrink-0" />
+                                        <div className="flex-grow">
+                                            <div className="flex justify-between items-start">
+                                                <h4 className="font-bold text-white text-base sm:text-lg">{sponsor.name}</h4>
+                                                <span className="text-xs font-semibold uppercase tracking-wider px-2 py-1 rounded-full bg-black/30 text-neutral-300">{sponsor.count && sponsor.count > 1 ? `${sponsor.count}x ` : ''}{sponsor.adType}</span>
+                                            </div>
+                                            <p className="text-sm text-neutral-300 mt-1 line-clamp-2">{sponsor.description}</p>
                                         </div>
-                                        <p className="text-sm text-neutral-300 mt-1 line-clamp-2">{sponsor.description}</p>
                                     </div>
-                                </div>
+                                </button>
                             </li>
                         ))}
                     </ul>
@@ -679,9 +706,9 @@ const Calendar: React.FC<{ onConfirmDates: (dates: string[]) => void; onBack: ()
                 <p className="text-sm text-neutral-400 mb-4">Choose one or more available days to run your ad.</p>
                 <div className="bg-neutral-800 p-4 rounded-lg">
                     <div className="flex items-center justify-between mb-4">
-                        <button onClick={() => setCurrentMonthDate(new Date(currentMonthDate.getFullYear(), currentMonthDate.getMonth() - 1, 1))} className="p-2 rounded-full hover:bg-white/10"><ChevronLeftIcon className="w-5 h-5" /></button>
+                        <button onClick={() => setCurrentMonthDate(new Date(currentMonthDate.getFullYear(), currentMonthDate.getMonth() - 1, 1))} className="p-2 rounded-full hover:bg-white/10" aria-label="Previous month"><ChevronLeftIcon className="w-5 h-5" /></button>
                         <h4 className="font-bold text-lg text-white">{currentMonthDate.toLocaleString('default', { month: 'long', year: 'numeric' })}</h4>
-                        <button onClick={() => setCurrentMonthDate(new Date(currentMonthDate.getFullYear(), currentMonthDate.getMonth() + 1, 1))} className="p-2 rounded-full hover:bg-white/10"><ChevronRightIcon className="w-5 h-5" /></button>
+                        <button onClick={() => setCurrentMonthDate(new Date(currentMonthDate.getFullYear(), currentMonthDate.getMonth() + 1, 1))} className="p-2 rounded-full hover:bg-white/10" aria-label="Next month"><ChevronRightIcon className="w-5 h-5" /></button>
                     </div>
                     <div className="grid grid-cols-7 gap-1 text-center text-xs text-neutral-400 mb-2">
                         {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => <div key={d}>{d}</div>)}
@@ -979,7 +1006,7 @@ const AdForm: React.FC<{
                     
                     <div>
                         <label htmlFor="piUsername" className="block text-sm font-medium text-neutral-300 mb-1">Pi Username</label>
-                        <input type="text" id="piUsername" value={piUser?.username || 'Authenticating...'} readOnly
+                        <input type="text" id="piUsername" value={piUser?.username || 'Pi Browser Required'} readOnly
                             className="w-full px-3 py-2 bg-neutral-900 border border-neutral-700 rounded-md text-neutral-400 focus:outline-none" />
                     </div>
 

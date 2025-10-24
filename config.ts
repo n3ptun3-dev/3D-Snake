@@ -59,9 +59,18 @@ log(`Final PI_SANDBOX value: ${PI_SANDBOX}`);
 
 
 // DUMMY_MODE is for local development outside of Pi Browser. Injected by the build script.
-const dummyModeString = process.env.DUMMY_MODE || 'false';
-export const DUMMY_MODE = dummyModeString === 'true';
-log(`Final DUMMY_MODE value: ${DUMMY_MODE}`);
+// const dummyModeString = process.env.DUMMY_MODE || 'false';
+// export const DUMMY_MODE = dummyModeString === 'true';
+
+// --- AI STUDIO DEPLOYMENT OVERRIDE ---
+// To deploy with dummy mode enabled from within AI Studio, we hardcode the value here.
+// The "Deploy" button does not use the `npm run build:dummy` script.
+export const DUMMY_MODE = false;
+log(`Final DUMMY_MODE value (Hardcoded for AI Studio): ${DUMMY_MODE}`);
+
+// NEW: URL for the dedicated chat backend service
+export const CHAT_SERVICE_URL = 'https://bus-stop-chat-service-945566931016.europe-west1.run.app';
+log(`Using CHAT_SERVICE_URL: ${CHAT_SERVICE_URL}`);
 
 
 export const FIREBASE_CONFIG = {

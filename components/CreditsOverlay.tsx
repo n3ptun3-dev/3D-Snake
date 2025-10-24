@@ -1,10 +1,10 @@
 import React from 'react';
 import { XIcon } from './icons';
-import { piService } from '../utils/pi';
 
 interface CreditsOverlayProps {
     onClose: () => void;
     isRotated: boolean;
+    onOpenExternalUrl: (url: string) => void;
 }
 
 const CreditSection: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
@@ -14,15 +14,10 @@ const CreditSection: React.FC<{ title: string; children: React.ReactNode }> = ({
     </section>
 );
 
-const CreditsOverlay: React.FC<CreditsOverlayProps> = ({ onClose, isRotated }) => {
+const CreditsOverlay: React.FC<CreditsOverlayProps> = ({ onClose, isRotated, onOpenExternalUrl }) => {
     const containerClasses = isRotated
-        ? 'h-full max-h-lg w-auto max-w-[90dvw]'
-        : 'w-full max-w-lg max-h-[90dvh]';
-
-    const handleLinkClick = (e: React.MouseEvent, url: string) => {
-        e.preventDefault();
-        piService.openUrl(url);
-    };
+        ? 'h-auto max-h-[95%] w-auto max-w-[90vh]'
+        : 'h-auto w-full max-w-lg max-h-[90%]';
 
     return (
         <div
@@ -49,7 +44,7 @@ const CreditsOverlay: React.FC<CreditsOverlayProps> = ({ onClose, isRotated }) =
                             <strong>Lead Developer & Visionary:</strong>{' '}
                             <a 
                                 href="https://profiles.pinet.com/profiles/n3ptun3" 
-                                onClick={(e) => handleLinkClick(e, 'https://profiles.pinet.com/profiles/n3ptun3')}
+                                onClick={(e) => { e.preventDefault(); onOpenExternalUrl('https://profiles.pinet.com/profiles/n3ptun3'); }}
                                 target="_blank" 
                                 rel="noopener noreferrer" 
                                 className="text-yellow-400 hover:underline"
@@ -74,10 +69,6 @@ const CreditsOverlay: React.FC<CreditsOverlayProps> = ({ onClose, isRotated }) =
 
                      <CreditSection title="Audio">
                         <p>Background music and sound effects are sourced from various royalty-free and open-source libraries.</p>
-                    </CreditSection>
-
-                    <CreditSection title="Special Thanks">
-                        <p>A huge thank you to the Pi Network community and all the Pioneers for their inspiration and support. This game is built for you.</p>
                     </CreditSection>
                 </div>
             </div>

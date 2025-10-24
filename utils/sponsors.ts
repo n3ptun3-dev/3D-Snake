@@ -1,5 +1,5 @@
 import { AdType, AdSubmissionData, ApprovedAd, BookedSlots, PromoCode } from '../types';
-import { BACKEND_URL } from '../config';
+import { BACKEND_URL, DUMMY_MODE } from '../config';
 
 // --- ADVERTISING LOGIC ---
 
@@ -353,7 +353,7 @@ export const createAdOrder = async (data: Omit<AdSubmissionData, 'paymentId'>): 
         const response = await fetch(`${BACKEND_URL}/createOrder`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
+            body: JSON.stringify({ ...data, dummyMode: DUMMY_MODE }),
         });
 
         const responseData = await response.json();
@@ -374,6 +374,11 @@ export const createAdOrder = async (data: Omit<AdSubmissionData, 'paymentId'>): 
  * @param data The complete and paid ad submission data.
  */
 export const submitAdToArchive = async (data: AdSubmissionData): Promise<void> => {
+    if (DUMMY_MODE) {
+        console.log("DUMMY_MODE: Bypassing ad submission to Google Form archive.");
+        return Promise.resolve();
+    }
+
     const formData = new FormData();
 
     formData.append(FORM_ENTRIES.paymentId, data.paymentId);

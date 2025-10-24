@@ -22,7 +22,7 @@ interface SettingsProps {
     onIsBackgroundPlayEnabledChange: (enabled: boolean) => void;
     savedStations: RadioStation[];
     onToggleSaveStation: (station: RadioStation | null) => void;
-    showBackdrop?: boolean;
+    showBackdrop: boolean;
     radioPlaybackError: string | null;
     onClearRadioPlaybackError: () => void;
 }
@@ -31,7 +31,7 @@ const Settings: React.FC<SettingsProps> = ({
     onClose, musicSource, onMusicSourceChange, currentStation, onStationSelect,
     radioSearchTerm, onRadioSearchTermChange, radioStations, isRadioLoading, radioError, searchRadioStations,
     isRotated, isBackgroundPlayEnabled, onIsBackgroundPlayEnabledChange, savedStations, onToggleSaveStation,
-    showBackdrop = true, radioPlaybackError, onClearRadioPlaybackError
+    showBackdrop, radioPlaybackError, onClearRadioPlaybackError
 }) => {
     
     const [muteState, setMuteState] = useState(audioManager.getMuteState());
@@ -49,10 +49,11 @@ const Settings: React.FC<SettingsProps> = ({
             }
         };
 
+        // Only add the listener if there's no backdrop, because the backdrop itself handles closure.
         if (!showBackdrop) {
             const timerId = setTimeout(() => {
                 document.addEventListener('mousedown', handleClickOutside);
-            }, 0);
+            }, 0); // Use a timeout to prevent the initial click from closing the modal
             return () => {
                 clearTimeout(timerId);
                 document.removeEventListener('mousedown', handleClickOutside);
@@ -89,11 +90,12 @@ const Settings: React.FC<SettingsProps> = ({
     return (
         <div
             className={`fixed inset-0 z-50 flex items-center justify-center font-sans p-4 ${backdropClass}`}
+            onClick={showBackdrop ? onClose : undefined}
             role="dialog"
             aria-modal="true"
             aria-labelledby="settings-title"
         >
-            <div ref={modalRef} className={`relative bg-neutral-900/90 border border-neutral-700 rounded-2xl shadow-2xl flex flex-col ${modalClass} ${containerClasses}`}>
+            <div ref={modalRef} className={`relative bg-neutral-900/90 border border-neutral-700 rounded-2xl shadow-2xl flex flex-col ${modalClass} ${containerClasses}`} onClick={e => e.stopPropagation()}>
                 <header className="flex items-center justify-between p-6 pb-4 flex-shrink-0">
                     <h2 id="settings-title" className="text-xl font-bold text-white">Music Settings</h2>
                     <button
@@ -119,7 +121,7 @@ const Settings: React.FC<SettingsProps> = ({
                             </label>
                         )}
 
-                        <div className="flex items-center justify-between p-2 rounded-lg bg-black/30">
+                        <div className="flex items-center justify-between p-2 rounded-lg bg-black/30 border border-cyan-500/50">
                             <div className="min-w-0 flex-grow">
                                 <p className="text-xs text-neutral-400">Currently Playing</p>
                                 <p className="text-sm font-semibold truncate text-white">
@@ -177,6 +179,9 @@ const Settings: React.FC<SettingsProps> = ({
                         
                         {musicSource === 'saved' && (
                             <div className="mt-4 text-left">
+                                <p className="text-xs text-center text-neutral-400 bg-black/20 p-2 rounded-md mb-3">
+                                    Tap the <StarOutlineIcon className="w-3 h-3 inline-block -mt-1 mx-0.5" /> icon on any station to add or remove it from this list.
+                                </p>
                                 {savedStations.length > 0 ? (
                                     <div className="mt-3 h-48 overflow-y-auto pr-2">
                                         <ul className="space-y-1">
@@ -197,8 +202,7 @@ const Settings: React.FC<SettingsProps> = ({
                                     </div>
                                 ) : (
                                     <div className="text-center text-neutral-500 pt-8">
-                                        <p>You have no saved stations.</p>
-                                        <p className="text-sm">Find stations in "Online Radio" and tap the star to save them.</p>
+                                        <p>You have no saved stations yet.</p>
                                     </div>
                                 )}
                             </div>

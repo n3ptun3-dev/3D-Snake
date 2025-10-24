@@ -1,4 +1,3 @@
-
 import * as THREE from 'three';
 import { GameState, Point3D, FruitType, LightEventType, LightEventData, LayoutDetails, ActiveEffect } from '../types';
 import { FRUIT_COLORS, FULL_BOARD_WIDTH, FULL_BOARD_DEPTH, COLORS } from '../constants';
@@ -139,6 +138,42 @@ export class LightingSystem {
         
         this.updateGeometryColors(now, this.gridLines.geometry, this.gridVertexMap, finishedEffects.length > 0, speedMps);
         this.updateBuildingInstanceColors(now, this.buildingEdges, this.buildingInstancePositions, finishedEffects.length > 0, speedMps);
+    }
+
+    public setToStatic(staticColorString: string) {
+        if (!this.gridLines || !this.buildingEdges) return;
+        
+        this.activeEffects = [];
+        this.ambientEffectType = null;
+
+        const color = new THREE.Color(staticColorString);
+        let needsUpdate = false;
+
+        const gridColorAttr = this.gridLines.geometry.getAttribute('color') as THREE.BufferAttribute;
+        for (let i = 0; i < gridColorAttr.count; i++) {
+            if (gridColorAttr.getX(i) !== color.r || gridColorAttr.getY(i) !== color.g || gridColorAttr.getZ(i) !== color.b) {
+                gridColorAttr.setXYZ(i, color.r, color.g, color.b);
+                needsUpdate = true;
+            }
+        }
+        if (needsUpdate) {
+            gridColorAttr.needsUpdate = true;
+        }
+
+        if (this.buildingEdges.instanceColor) {
+            needsUpdate = false;
+            const tempColor = new THREE.Color();
+            for (let i = 0; i < this.buildingEdges.count; i++) {
+                this.buildingEdges.getColorAt(i, tempColor);
+                if (!tempColor.equals(color)) {
+                    this.buildingEdges.setColorAt(i, color);
+                    needsUpdate = true;
+                }
+            }
+            if (needsUpdate) {
+                this.buildingEdges.instanceColor.needsUpdate = true;
+            }
+        }
     }
     
     public getTileEffects(gridX: number, gridZ: number, time: number): THREE.Color | null {

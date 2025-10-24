@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LeaderboardEntry, DeviceType } from '../types';
-import { fetchLeaderboard, countryCodeToFlag, formatTimeAgo } from '../utils/leaderboard';
+import { fetchLeaderboard, countryCodeToFlag, formatTimeAgo, getGeoInfo } from '../utils/leaderboard';
 import { isMobile } from '../utils/device';
-import { XIcon, SpinnerIcon, MobileIcon, DesktopComputerIcon, PodiumIcon } from './icons';
+import { XIcon, SpinnerIcon, MobileIcon, DesktopComputerIcon, PodiumIcon, SpeedIcon, HourglassIcon } from './icons';
 
 interface LeaderboardProps {
   onClose: () => void;
@@ -10,41 +10,88 @@ interface LeaderboardProps {
   isRotated: boolean;
 }
 
+const ToggleFilterButton: React.FC<{
+  label: string;
+  icon?: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  title?: string;
+}> = ({ label, icon, onClick, disabled, title }) => (
+  <button
+    onClick={onClick}
+    disabled={disabled}
+    title={title}
+    className="flex-1 flex items-center justify-center gap-2 max-w-[160px] px-3 py-2 text-sm font-semibold rounded-lg transition-colors border bg-neutral-800 border-neutral-600 text-neutral-200 hover:bg-neutral-700/80 disabled:opacity-50 disabled:cursor-not-allowed"
+  >
+    {icon}
+    <span className="capitalize">{label}</span>
+  </button>
+);
+
 const Leaderboard: React.FC<LeaderboardProps> = ({ onClose, onLeaderboardUpdate, isRotated }) => {
   const [activeTab, setActiveTab] = useState<DeviceType>(isMobile() ? 'mobile' : 'computer');
   const [allScores, setAllScores] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // New state for filters
+  const [scopeFilter, setScopeFilter] = useState<'global' | 'local'>('global');
+  const [sortFilter, setSortFilter] = useState<'score' | 'speed' | 'time'>('score');
+  const [userRegion, setUserRegion] = useState<string | null>(null);
+  const [isFetchingRegion, setIsFetchingRegion] = useState(true);
+
   useEffect(() => {
-    const loadScores = async () => {
+    const loadData = async () => {
       setLoading(true);
       setError(null);
+      setIsFetchingRegion(true);
+      
       try {
-        const [mobileScores, computerScores] = await Promise.all([
+        const [mobileScores, computerScores, geoInfo] = await Promise.all([
           fetchLeaderboard('mobile').catch(() => []),
-          fetchLeaderboard('computer').catch(() => [])
+          fetchLeaderboard('computer').catch(() => []),
+          getGeoInfo().catch(() => null)
         ]);
-        const combinedScores = [...mobileScores, ...computerScores];
         
+        const combinedScores = [...mobileScores, ...computerScores];
         onLeaderboardUpdate(combinedScores);
         setAllScores(combinedScores);
+        setUserRegion(geoInfo ? geoInfo.countryCode : null);
+
       } catch (err) {
         setError('Could not load leaderboard. Please try again later.');
         console.error(err);
       } finally {
         setLoading(false);
+        setIsFetchingRegion(false);
       }
     };
-    loadScores();
+    loadData();
   }, [onLeaderboardUpdate]);
   
   const scores = useMemo(() => {
-    const filtered = allScores.filter(entry => entry.device === activeTab);
-    return filtered
-        .sort((a, b) => b.score - a.score)
-        .map((entry, index) => ({ ...entry, rank: index + 1 }));
-  }, [allScores, activeTab]);
+    let filtered = allScores.filter(entry => entry.device === activeTab);
+
+    if (scopeFilter === 'local' && userRegion) {
+        const extractCountryCode = (regionStr: string): string => {
+            if (!regionStr) return 'UNK';
+            if (regionStr.length === 2 && /^[a-zA-Z]{2}$/.test(regionStr)) return regionStr;
+            const match = regionStr.match(/\((\w{2})\)/);
+            return match && match[1] ? match[1] : 'UNK';
+        };
+        filtered = filtered.filter(entry => extractCountryCode(entry.region) === userRegion);
+    }
+    
+    if (sortFilter === 'speed') {
+        filtered.sort((a, b) => b.speed - a.speed);
+    } else if (sortFilter === 'time') {
+        filtered.sort((a, b) => b.time - a.time);
+    } else { // Default to score
+        filtered.sort((a, b) => b.score - a.score);
+    }
+
+    return filtered.map((entry, index) => ({ ...entry, rank: index + 1 }));
+  }, [allScores, activeTab, scopeFilter, sortFilter, userRegion]);
   
   const extractCountryCode = (regionStr: string): string => {
     if (!regionStr) return 'UNK';
@@ -61,6 +108,10 @@ const Leaderboard: React.FC<LeaderboardProps> = ({ onClose, onLeaderboardUpdate,
   };
 
   const getTileClass = (rank: number) => {
+    if (sortFilter === 'time') {
+      if (rank <= 3) return 'bg-sky-600/20 border-sky-500';
+      return 'bg-white/5 border-white/10';
+    }
     if (rank === 1) return 'bg-yellow-500/30 border-yellow-400';
     if (rank === 2) return 'bg-gray-400/30 border-gray-300';
     if (rank === 3) return 'bg-orange-600/30 border-orange-500';
@@ -73,11 +124,27 @@ const Leaderboard: React.FC<LeaderboardProps> = ({ onClose, onLeaderboardUpdate,
       onClick={() => setActiveTab(type)}
       className={`flex-1 flex items-center justify-center gap-2 p-3 text-sm sm:text-base font-semibold border-b-2 ${activeTab === type ? 'border-cyan-400 text-white' : 'border-transparent text-neutral-400 hover:text-white hover:bg-white/5'}`}
       aria-pressed={activeTab === type}
+      aria-label={`Show ${label} leaderboard`}
     >
       {icon}
       {label}
     </button>
   );
+
+  const handleSortToggle = () => {
+    setSortFilter(current => {
+      if (current === 'score') return 'speed';
+      if (current === 'speed') return 'time';
+      return 'score';
+    });
+  };
+
+  const sortButtonLabel = sortFilter === 'time' ? 'most recent' : sortFilter;
+  const sortButtonIcon = useMemo(() => {
+    if (sortFilter === 'score') return <PodiumIcon className="w-4 h-4" />;
+    if (sortFilter === 'speed') return <SpeedIcon className="w-4 h-4" />;
+    return <HourglassIcon className="w-4 h-4" />;
+  }, [sortFilter]);
 
   const containerClasses = isRotated
     ? 'h-[95%] max-h-lg w-[90%] max-w-[700px]'
@@ -106,10 +173,26 @@ const Leaderboard: React.FC<LeaderboardProps> = ({ onClose, onLeaderboardUpdate,
           </button>
         </header>
 
-        {/* Tabs */}
-        <div className="flex items-stretch border-b border-neutral-700 flex-shrink-0">
-          <TabButton type="computer" label="Computer" icon={<DesktopComputerIcon className="w-5 h-5" />} />
-          <TabButton type="mobile" label="Mobile" icon={<MobileIcon className="w-5 h-5" />} />
+        {/* Tabs & Filters */}
+        <div className="border-b border-neutral-700 flex-shrink-0">
+            <div className="flex items-stretch">
+                <TabButton type="computer" label="Computer" icon={<DesktopComputerIcon className="w-5 h-5" />} />
+                <TabButton type="mobile" label="Mobile" icon={<MobileIcon className="w-5 h-5" />} />
+            </div>
+            <div className="p-3 flex items-center justify-center gap-4 bg-black/20">
+                <ToggleFilterButton
+                    label={scopeFilter}
+                    onClick={() => setScopeFilter(s => (s === 'global' ? 'local' : 'global'))}
+                    disabled={isFetchingRegion || !userRegion}
+                    title={!userRegion ? 'Could not determine your location to show local scores.' : 'Toggle between Global and Local scores'}
+                />
+                <ToggleFilterButton
+                    label={sortButtonLabel}
+                    icon={sortButtonIcon}
+                    onClick={handleSortToggle}
+                    title="Cycle sorting between Score, Speed, and Most Recent"
+                />
+            </div>
         </div>
 
         {/* Content */}
@@ -130,11 +213,11 @@ const Leaderboard: React.FC<LeaderboardProps> = ({ onClose, onLeaderboardUpdate,
               <ul className="space-y-2">
                 {scores.map(entry => (
                   <li
-                    key={`${entry.rank}-${entry.name}-${entry.score}`}
+                    key={`${entry.rank}-${entry.name}-${entry.score}-${entry.time}`}
                     className={`p-3 rounded-lg border transition-all duration-300 ${getTileClass(entry.rank)}`}
                   >
                     <div className="flex items-center gap-4">
-                      <div className={`text-xl sm:text-2xl font-bold w-10 text-center flex-shrink-0 ${entry.rank <= 3 ? 'text-yellow-300' : 'text-neutral-300'}`}>
+                      <div className={`text-xl sm:text-2xl font-bold w-10 text-center flex-shrink-0 ${sortFilter !== 'time' && entry.rank <= 3 ? 'text-yellow-300' : 'text-neutral-300'}`}>
                         {entry.rank}
                       </div>
                       <div className="flex-grow">
@@ -142,11 +225,19 @@ const Leaderboard: React.FC<LeaderboardProps> = ({ onClose, onLeaderboardUpdate,
                           <p className="text-base sm:text-lg font-bold text-white truncate pr-2">
                              {entry.name} {countryCodeToFlag(extractCountryCode(entry.region))}
                           </p>
-                          <p className="text-lg sm:text-xl font-bold text-cyan-300">{entry.score.toLocaleString()}</p>
+                          {sortFilter === 'speed' ? (
+                               <p className="text-lg sm:text-xl font-bold text-cyan-300">{entry.speed.toFixed(2)} m/s</p>
+                          ) : (
+                               <p className="text-lg sm:text-xl font-bold text-cyan-300">{entry.score.toLocaleString()}</p>
+                          )}
                         </div>
                         <div className="flex items-center justify-between text-xs sm:text-sm text-neutral-400 mt-1">
-                          <span>Lv.{entry.level} | {entry.speed.toFixed(2)} m/s</span>
-                          <span>{formatTimeAgo(entry.time)}</span>
+                          {sortFilter === 'speed' ? (
+                                <span>Score: {entry.score.toLocaleString()} | Lv.{entry.level}</span>
+                          ) : (
+                                <span>Lv.{entry.level} | {entry.speed.toFixed(2)} m/s</span>
+                          )}
+                          <span className={sortFilter === 'time' ? 'font-bold text-cyan-300' : ''}>{formatTimeAgo(entry.time)}</span>
                         </div>
                       </div>
                     </div>
@@ -155,7 +246,7 @@ const Leaderboard: React.FC<LeaderboardProps> = ({ onClose, onLeaderboardUpdate,
               </ul>
             ) : (
                 <div className="flex flex-col items-center justify-center h-full text-neutral-400">
-                    <p className="text-lg">No scores yet. Be the first!</p>
+                    <p className="text-lg">{scopeFilter === 'local' ? "No local scores found." : "No scores yet. Be the first!"}</p>
                 </div>
             )
           )}

@@ -41,7 +41,12 @@ const EnterCodeModal: React.FC<EnterCodeModalProps> = ({ onClose, onSuccess, isR
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center font-sans p-4">
             <div className={`bg-neutral-900/90 border border-neutral-700 rounded-2xl shadow-2xl p-6 text-center ${containerClasses}`}>
                 <h2 className="text-xl font-bold text-white mb-2">Link Your Pi Account</h2>
-                <p className="text-neutral-300 mb-6">Open the game in the Pi Browser, go to the menu, and select "Play on Another Device" to get your code.</p>
+                <p className="text-neutral-300 mb-6">
+                    <a href="pi://d-snake-7a80a.web.app" className="text-cyan-400 hover:underline font-semibold">
+                        Open the game in the Pi Browser
+                    </a>
+                    , go to the menu, and select "Play on Another Device" to get your code.
+                </p>
                 <form onSubmit={handleLink} className="space-y-4">
                     <input
                         type="text"

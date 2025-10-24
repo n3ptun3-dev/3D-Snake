@@ -1,0 +1,289 @@
+// Global constants for spreadsheet IDs and sheet names
+const AD_SUBMISSIONS_ID = '1zU4mDapLuIWLaqIygXrBDwYpBUfvkoPnH3hcHJ4iB54';
+const APPROVED_ADS_ID = '1Lea-fkrmPaOlolawfJgF5C7dSti9LKjg9UfADqPzePg';
+const DENIED_ADS_ID = '1741qq_tqOTjyrQ92W8Q8_mpHoMiMrZLOLUMADAlbV2E';
+const CURRENT_ADS_ID = '1a6g83ezEjVcjgbjsot1UQM6uxTN2J1nEngUi0sGwxsQ';
+const PUBLISHED_ADS_ID = '1SbD1CTfw8-yfECGne5uNeIqaiNi6RC8YxguHSQRW6NI';
+const SHEET_NAME = 'Responses';
+
+// Column indices (0-based) for Ad Submissions sheet
+const COL_TIMESTAMP_ADSUB = 0;
+const COL_ORDER_NUMBER_ADSUB = 1;
+const COL_SCHEDULE_DATE_ADSUB = 2;
+const COL_QUANTITY_ADSUB = 9;
+const COL_PAYMENT_ID_ADSUB = 10;
+const COL_TYPE_ADSUB = 12; // Adjusted for new column layout
+const COL_APPROVED_ADSUB = 15; // Adjusted for new column layout
+const COL_APPROVED_DATE_ADSUB = 16; // Adjusted for new column layout
+const COL_STATUS_ADSUB = 17; // Adjusted for new column layout
+const COL_TOTAL_QUANTITY_ADSUB = 18; // Adjusted for new column layout
+const COL_TOTAL_DAYS_ADSUB = 19; // Adjusted for new column layout
+
+// Column indices (0-based) for Approved Ads sheet
+const COL_TIMESTAMP_APPROVED = 0;
+const COL_ORDER_NUMBER_APPROVED = 1;
+const COL_SCHEDULE_DATE_APPROVED = 2;
+const COL_IMAGE_URL_APPROVED = 3;
+const COL_TITLE_APPROVED = 4;
+const COL_DESCRIPTION_APPROVED = 5;
+const COL_ADVERTISER_NAME_APPROVED = 6;
+const COL_WEBSITE_URL_APPROVED = 7;
+const COL_STATUS_APPROVED = 17; // Adjusted for new column layout
+const COL_PAYMENT_ID_APPROVED = 10;
+const COL_ADVERTISER_PAID_APPROVED = 14;
+
+// Columns to be copied to "Current Ads" (indices from Approved Ads sheet)
+const COLUMNS_TO_COPY_TO_CURRENT = [
+  COL_TIMESTAMP_APPROVED,
+  COL_ORDER_NUMBER_APPROVED,
+  COL_SCHEDULE_DATE_APPROVED,
+  COL_IMAGE_URL_APPROVED,
+  COL_TITLE_APPROVED,
+  COL_DESCRIPTION_APPROVED,
+  COL_ADVERTISER_NAME_APPROVED,
+  COL_WEBSITE_URL_APPROVED
+];
+
+
+/**
+ * Creates installable triggers for form submission, on-edit, and daily ad management.
+ * This function only needs to be run once.
+ */
+function setupTriggers() {
+  // Delete any existing triggers to avoid duplicates
+  const allTriggers = ScriptApp.getProjectTriggers();
+  for (const trigger of allTriggers) {
+    ScriptApp.deleteTrigger(trigger);
+  }
+
+  // Trigger on every manual edit
+  ScriptApp.newTrigger('onEdit')
+    .forSpreadsheet(SpreadsheetApp.openById(AD_SUBMISSIONS_ID))
+    .onEdit()
+    .create();
+
+  // Trigger to run the ad management function daily
+  ScriptApp.newTrigger('dailyAdManagement')
+    .timeBased()
+    .everyDays(1)
+    .atHour(2) // Runs every day at 2:00 AM to keep the ad list current
+    .create();
+}
+
+/**
+ * Triggered when a cell is edited, specifically for the "Approved" column.
+ * This is an installable trigger, allowing it to access other spreadsheets.
+ */
+function onEdit(event) {
+  const sheet = event.source.getSheetByName(SHEET_NAME);
+  const range = event.range;
+
+  if (range.getColumn() === COL_APPROVED_ADSUB + 1 && range.getSheet().getName() === SHEET_NAME) {
+    const approvedValue = range.getValue().toString().toLowerCase().trim();
+
+    if (approvedValue === 'yes' || approvedValue === 'no') {
+      const lock = LockService.getScriptLock();
+      lock.tryLock(30000); // Wait up to 30 seconds for the lock
+
+      if (!lock.hasLock()) {
+        Logger.log("Could not obtain lock, another script instance is likely running. Exiting.");
+        return;
+      }
+
+      try {
+        const originalRowIndex = range.getRow();
+        const originalValues = sheet.getRange(originalRowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+        const paymentId = originalValues[COL_PAYMENT_ID_ADSUB];
+        const timezone = Session.getScriptTimeZone();
+        const approvedDateString = Utilities.formatDate(new Date(), timezone, 'MM/dd/yyyy HH:mm:ss');
+        const timestamp = originalValues[COL_TIMESTAMP_ADSUB] instanceof Date ? Utilities.formatDate(originalValues[COL_TIMESTAMP_ADSUB], timezone, 'MM/dd/yyyy HH:mm:ss') : originalValues[COL_TIMESTAMP_ADSUB];
+
+        if (approvedValue === 'yes') {
+          // Process and expand the approved row
+          const scheduleDatesString = originalValues[COL_SCHEDULE_DATE_ADSUB];
+          const quantityPerDay = parseInt(originalValues[COL_QUANTITY_ADSUB], 10);
+          const type = originalValues[COL_TYPE_ADSUB];
+
+          const dates = scheduleDatesString.split(',').map(dateStr => dateStr.trim()).filter(dateStr => dateStr);
+          const totalDays = dates.length;
+          const totalQuantity = totalDays * quantityPerDay;
+          const rowsToAddToApproved = [];
+
+          // Loop through dates first, then quantity for correct order number assignment
+          for (const date of dates) {
+            for (let i = 0; i < quantityPerDay; i++) {
+              const nextSequenceNumber = getAndUpdateNextSequenceNumber(type);
+              const newRow = [...originalValues];
+              
+              newRow[COL_TIMESTAMP_APPROVED] = timestamp; // Use formatted timestamp
+              newRow[COL_ORDER_NUMBER_APPROVED] = generateOrderNumberString(type, nextSequenceNumber);
+              newRow[COL_SCHEDULE_DATE_APPROVED] = Utilities.formatDate(new Date(date), timezone, 'MM/dd/yyyy');
+              newRow[COL_APPROVED_ADSUB] = 'yes';
+              newRow[COL_APPROVED_DATE_ADSUB] = approvedDateString;
+              newRow[COL_STATUS_APPROVED] = 'Approved';
+              newRow[COL_TOTAL_DAYS_ADSUB] = totalDays;
+              newRow[COL_TOTAL_QUANTITY_ADSUB] = totalQuantity;
+              rowsToAddToApproved.push(newRow);
+            }
+          }
+
+          // Move the expanded rows to the Approved Ads spreadsheet
+          if (rowsToAddToApproved.length > 0) {
+            const approvedSheet = SpreadsheetApp.openById(APPROVED_ADS_ID).getSheetByName(SHEET_NAME);
+            approvedSheet.getRange(approvedSheet.getLastRow() + 1, 1, rowsToAddToApproved.length, rowsToAddToApproved[0].length).setValues(rowsToAddToApproved);
+          }
+
+          dailyAdManagement(); // Run the ad management function immediately
+
+        } else {
+          // If the ad is denied, move the single row to the Denied Ads spreadsheet
+          const deniedSheet = SpreadsheetApp.openById(DENIED_ADS_ID).getSheetByName(SHEET_NAME);
+          originalValues[COL_TIMESTAMP_ADSUB] = timestamp;
+          originalValues[COL_APPROVED_ADSUB] = 'no';
+          originalValues[COL_APPROVED_DATE_ADSUB] = approvedDateString;
+          originalValues[COL_STATUS_ADSUB] = 'Denied';
+          deniedSheet.appendRow(originalValues);
+        }
+
+        // Delete the original row from the Ad Submissions spreadsheet
+        sheet.deleteRow(originalRowIndex);
+
+      } finally {
+        // Always release the lock
+        lock.releaseLock();
+      }
+    }
+  }
+}
+
+/**
+ * Retrieves, increments, and stores the next sequence number for a given ad type.
+ * @param {string} type The ad type value.
+ * @returns {number} The new, unique sequence number.
+ */
+function getAndUpdateNextSequenceNumber(type) {
+  const scriptProperties = PropertiesService.getScriptProperties();
+  const currentYear = new Date().getFullYear().toString().substring(2);
+  const key = `lastOrderNumber_${currentYear}_${type}`;
+  
+  let lastOrderNumber = parseInt(scriptProperties.getProperty(key), 10);
+  if (isNaN(lastOrderNumber)) {
+    lastOrderNumber = 0;
+  }
+  
+  const nextOrderNumber = lastOrderNumber + 1;
+  scriptProperties.setProperty(key, nextOrderNumber.toString());
+  
+  return nextOrderNumber;
+}
+
+/**
+ * Helper function to format the order number string.
+ * @param {string} type The ad type value.
+ * @param {number} sequenceNumber The unique sequence number.
+ * @returns {string} The formatted order number.
+ */
+function generateOrderNumberString(type, sequenceNumber) {
+  const currentYear = new Date().getFullYear().toString().substring(2);
+  // Pad the sequence number with up to 6 leading zeros
+  return `${currentYear}${type}${String(sequenceNumber).padStart(6, '0')}`;
+}
+
+/**
+ * Logic to manage ads on the Approved Ads spreadsheet.
+ * This function is now part of the Ad Submissions script.
+ */
+function dailyAdManagement() {
+  const sourceSpreadsheet = SpreadsheetApp.openById(APPROVED_ADS_ID);
+  const sourceSheet = sourceSpreadsheet.getSheetByName(SHEET_NAME);
+  const currentAdsSheet = SpreadsheetApp.openById(CURRENT_ADS_ID).getSheetByName(SHEET_NAME);
+  const publishedAdsSheet = SpreadsheetApp.openById(PUBLISHED_ADS_ID).getSheetByName(SHEET_NAME);
+
+  // --- PART 1: Preserve "sys" ads on the Current Ads spreadsheet ---
+  const currentAdsData = currentAdsSheet.getDataRange().getValues();
+  const preservedSysRows = [];
+
+  // If there's more than just the header, check for "sys" ads
+  if (currentAdsData.length > 1) {
+    const header = currentAdsData.shift(); // Remove header
+    for (const row of currentAdsData) {
+      const orderNumber = row[COL_ORDER_NUMBER_APPROVED];
+      // Check if order number exists and contains 'sys'
+      if (orderNumber && orderNumber.toString().includes('sys')) {
+        preservedSysRows.push(row);
+      }
+    }
+  }
+
+  // Clear the Current Ads spreadsheet (except for the header)
+  if (currentAdsSheet.getLastRow() > 1) {
+    currentAdsSheet.getRange(2, 1, currentAdsSheet.getLastRow() - 1, currentAdsSheet.getLastColumn()).clearContent();
+  }
+
+  // Write the preserved "sys" rows back to the sheet
+  if (preservedSysRows.length > 0) {
+    currentAdsSheet.getRange(currentAdsSheet.getLastRow() + 1, 1, preservedSysRows.length, preservedSysRows[0].length).setValues(preservedSysRows);
+  }
+
+  // --- PART 2: Copy time-bound ads from Approved to Current, and move completed ads to Published ---
+  const allData = sourceSheet.getDataRange().getValues();
+  if (allData.length <= 1) return;
+  allData.shift(); // Remove header
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const twoDaysAgo = new Date(today);
+  twoDaysAgo.setDate(today.getDate() - 2);
+
+  const twoDaysFromNow = new Date(today);
+  twoDaysFromNow.setDate(today.getDate() + 2);
+
+  const rowsToCopyToCurrent = [];
+  const rowsToMoveToPublished = [];
+  const rowIndicesToDeleteFromApproved = [];
+  const rowsToUpdateInApproved = [];
+
+  for (let i = allData.length - 1; i >= 0; i--) {
+    const row = allData[i];
+    const scheduleDate = new Date(row[COL_SCHEDULE_DATE_APPROVED]);
+    scheduleDate.setHours(0, 0, 0, 0);
+
+    // Ad is scheduled for today or within the next 2 days
+    if (scheduleDate >= twoDaysAgo && scheduleDate <= twoDaysFromNow) {
+      const newRow = COLUMNS_TO_COPY_TO_CURRENT.map(colIndex => row[colIndex]);
+      rowsToCopyToCurrent.unshift(newRow); // Copy relevant columns
+      // Only update if the status is not already 'Active'
+      if (row[COL_STATUS_APPROVED] !== 'Active') {
+        row[COL_STATUS_APPROVED] = 'Active'; // Update status
+        rowsToUpdateInApproved.push({ rowIndex: i + 2, rowData: row });
+      }
+    }
+    // Ad's scheduled date has passed
+    else if (scheduleDate < twoDaysAgo) {
+      rowsToMoveToPublished.unshift(row); // Prepare to move the whole row
+      rowIndicesToDeleteFromApproved.push(i + 2); // Mark for deletion
+    }
+  }
+
+  // Update rows in the Approved Ads sheet
+  for (const update of rowsToUpdateInApproved) {
+    sourceSheet.getRange(update.rowIndex, 1, 1, update.rowData.length).setValues([update.rowData]);
+  }
+
+  // Copy rows to the "Current Ads" sheet
+  if (rowsToCopyToCurrent.length > 0) {
+    currentAdsSheet.getRange(currentAdsSheet.getLastRow() + 1, 1, rowsToCopyToCurrent.length, rowsToCopyToCurrent[0].length).setValues(rowsToCopyToCurrent);
+  }
+
+  // Move completed ads to "Published Ads"
+  if (rowsToMoveToPublished.length > 0) {
+    publishedAdsSheet.getRange(publishedAdsSheet.getLastRow() + 1, 1, rowsToMoveToPublished.length, rowsToMoveToPublished[0].length).setValues(rowsToMoveToPublished);
+  }
+
+  // Delete completed ads from the Approved Ads sheet
+  rowIndicesToDeleteFromApproved.sort((a, b) => b - a);
+  for (const rowIndex of rowIndicesToDeleteFromApproved) {
+    sourceSheet.deleteRow(rowIndex);
+  }
+}

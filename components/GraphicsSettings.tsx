@@ -7,27 +7,29 @@ interface GraphicsSettingsProps {
     currentQuality: GraphicsQuality;
     onQualityChange: (quality: GraphicsQuality) => void;
     isRotated: boolean;
+    isDynamicLightingDisabled: boolean;
+    onDynamicLightingChange: (isDisabled: boolean) => void;
 }
 
 const QUALITY_OPTIONS: { id: GraphicsQuality; name: string; description: string }[] = [
     {
         id: 'High',
         name: 'High',
-        description: 'Full visual experience with all effects enabled.',
+        description: 'Full visual experience with all effects enabled, including shadows and bloom, running at up to 60 FPS during gameplay.',
     },
     {
         id: 'Medium',
         name: 'Medium',
-        description: 'Balanced performance and quality. Disables demanding effects like shadows.',
+        description: 'Balanced performance and quality. Gameplay runs at up to 60 FPS but disables demanding effects like shadows.',
     },
     {
         id: 'Low',
         name: 'Low',
-        description: 'Best performance. Disables shadows and post-processing effects like bloom.',
+        description: 'Best performance on all devices. Gameplay is capped at 30 FPS to save power. Disables shadows, bloom, and simplifies power-up models to cubes.',
     },
 ];
 
-const GraphicsSettings: React.FC<GraphicsSettingsProps> = ({ onClose, currentQuality, onQualityChange, isRotated }) => {
+const GraphicsSettings: React.FC<GraphicsSettingsProps> = ({ onClose, currentQuality, onQualityChange, isRotated, isDynamicLightingDisabled, onDynamicLightingChange }) => {
     
     const selectedOption = QUALITY_OPTIONS.find(opt => opt.id === currentQuality) || QUALITY_OPTIONS[0];
 
@@ -79,6 +81,21 @@ const GraphicsSettings: React.FC<GraphicsSettingsProps> = ({ onClose, currentQua
                          <p className="text-sm text-neutral-300">{selectedOption.description}</p>
                     </div>
 
+                    {currentQuality === 'Low' && (
+                        <div className="pt-4 border-t border-neutral-700">
+                            <h3 className="text-lg font-semibold text-neutral-300 mb-2">Performance Options</h3>
+                            <label className="flex items-center justify-between p-3 rounded-lg bg-neutral-800 cursor-pointer">
+                                <span className="text-white">Disable dynamic lighting</span>
+                                <input
+                                    type="checkbox"
+                                    checked={isDynamicLightingDisabled}
+                                    onChange={(e) => onDynamicLightingChange(e.target.checked)}
+                                    className="w-5 h-5 text-cyan-500 bg-neutral-700 border-neutral-600 rounded focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-neutral-800"
+                                />
+                            </label>
+                            <p className="text-xs text-neutral-400 mt-2 px-1">Disables all ambient and event-based lighting for a significant performance boost on very low-end devices.</p>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

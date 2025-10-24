@@ -1,4 +1,5 @@
-import { initializeApp, getApps } from "firebase/app";
+import { initializeApp, getApps, FirebaseApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
 import { FIREBASE_CONFIG } from './config';
 
 /**
@@ -12,6 +13,8 @@ export const initFirebase = async () => {
     return;
   }
   if (getApps().length === 0) {
-    initializeApp(FIREBASE_CONFIG);
+    const app: FirebaseApp = initializeApp(FIREBASE_CONFIG);
+    // Initialize Analytics and get a reference to the service
+    getAnalytics(app);
   }
 };

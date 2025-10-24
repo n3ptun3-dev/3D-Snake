@@ -1,10 +1,10 @@
 import React from 'react';
 import { XIcon } from './icons';
-import { piService } from '../utils/pi';
 
 interface HowItWorksOverlayProps {
     onClose: () => void;
     isRotated: boolean;
+    onOpenExternalUrl: (url: string) => void;
 }
 
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
@@ -14,14 +14,14 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
     </section>
 );
 
-const HowItWorksOverlay: React.FC<HowItWorksOverlayProps> = ({ onClose, isRotated }) => {
+const HowItWorksOverlay: React.FC<HowItWorksOverlayProps> = ({ onClose, isRotated, onOpenExternalUrl }) => {
     const containerClasses = isRotated
         ? 'h-full max-h-lg w-auto max-w-[90dvw]'
         : 'w-full max-w-lg max-h-[90dvh]';
 
     const handleLinkClick = (e: React.MouseEvent, url: string) => {
         e.preventDefault();
-        piService.openUrl(url);
+        onOpenExternalUrl(url);
     };
 
     return (

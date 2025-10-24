@@ -10,8 +10,8 @@ interface MenuOverlayProps {
     onOpenSettings: () => void;
     onOpenGraphicsSettings: () => void;
     onOpenFeedback: () => void;
+    onOpenWhatsNew: () => void;
     onOpenJoinPi: () => void;
-    onOpenAboutSpi: () => void;
     onOpenCredits: () => void;
     onOpenTerms: () => void;
     onOpenPrivacyPolicy: () => void;
@@ -20,13 +20,14 @@ interface MenuOverlayProps {
     isPiBrowser: boolean;
     onOpenLinkDevice: () => void;
     onOpenEnterCode: () => void;
-    requestPiAuth: (intent: 'submit-score' | 'purchase-ad' | 'link-device', onSuccess: () => void, data?: any) => void;
+    requestPiAuth: (intent: 'submit-score' | 'purchase-ad' | 'link-device' | 'donation', onSuccess: () => void, data?: any) => void;
+    onOpenCareerProfile: () => void;
 }
 
 const MenuOverlay: React.FC<MenuOverlayProps> = ({ 
     onClose, isPaused, onEndGame, onOpenHowToPlay, onOpenSettings, onOpenGraphicsSettings,
-    onOpenFeedback, onOpenJoinPi, onOpenAboutSpi, onOpenCredits, onOpenTerms, onOpenPrivacyPolicy, piUser, isRotated,
-    isPiBrowser, onOpenLinkDevice, onOpenEnterCode, requestPiAuth
+    onOpenFeedback, onOpenWhatsNew, onOpenJoinPi, onOpenCredits, onOpenTerms, onOpenPrivacyPolicy, piUser, isRotated,
+    isPiBrowser, onOpenLinkDevice, onOpenEnterCode, requestPiAuth, onOpenCareerProfile
 }) => {
     const menuItems = [
         { name: 'How to Play', action: () => { onOpenHowToPlay(); onClose(); } },
@@ -41,10 +42,11 @@ const MenuOverlay: React.FC<MenuOverlayProps> = ({
                 onOpenLinkDevice();
                 onClose();
             } else {
+                // Close the menu first before showing the auth modal.
+                onClose();
                 requestPiAuth('link-device', () => {
-                    // This runs after successful auth
+                    // This runs after successful auth. The menu is already closed.
                     onOpenLinkDevice();
-                    onClose(); 
                 });
             }
         };
@@ -54,8 +56,8 @@ const MenuOverlay: React.FC<MenuOverlayProps> = ({
     }
 
     const commonMenuItems = [
+        { name: "Development Updates", action: () => { onOpenWhatsNew(); onClose(); } },
         { name: 'Feedback', action: () => { onOpenFeedback(); onClose(); } },
-        { name: 'About Spi vs Spi', action: () => { onOpenAboutSpi(); onClose(); } },
     ];
     
     // Conditionally add "Join Pi Network" if user is not in Pi Browser and not logged in.
@@ -73,8 +75,13 @@ const MenuOverlay: React.FC<MenuOverlayProps> = ({
 
 
     const containerClasses = isRotated
-        ? 'h-full max-h-sm w-auto max-w-[90dvw]'
-        : 'w-full max-w-sm max-h-[90dvh]';
+        ? 'h-auto max-h-[95%] w-auto max-w-[90dvw]'
+        : 'w-full max-w-sm max-h-[90%]';
+
+    const handleCareerClick = () => {
+        onOpenCareerProfile();
+        onClose();
+    };
 
     return (
         <div
@@ -100,7 +107,7 @@ const MenuOverlay: React.FC<MenuOverlayProps> = ({
                         {isPaused && (
                             <li>
                                 <button
-                                    onClick={onEndGame}
+                                    onClick={() => { onEndGame(); onClose(); }}
                                     className="w-full text-left p-3 rounded-lg text-lg font-semibold bg-red-600/80 hover:bg-red-700/80 text-white transition-colors"
                                 >
                                     End Game
@@ -112,6 +119,7 @@ const MenuOverlay: React.FC<MenuOverlayProps> = ({
                                 <button
                                     onClick={item.action}
                                     disabled={item.name === 'Account Linked ✅'}
+                                    aria-label={item.name === 'Account Linked ✅' ? 'Account is already linked' : item.name}
                                     className="w-full text-left p-3 rounded-lg text-lg font-semibold text-neutral-200 hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     {item.name}
@@ -121,11 +129,16 @@ const MenuOverlay: React.FC<MenuOverlayProps> = ({
                     </ul>
                 </div>
                 
-                {piUser && (
-                    <footer className="p-4 border-t border-neutral-700 text-center text-sm text-neutral-400 flex-shrink-0">
-                        Logged in as <strong className="text-yellow-300">@{piUser.username}</strong>
-                    </footer>
-                )}
+                <footer className="p-4 border-t border-neutral-700 text-center text-sm text-neutral-400 flex-shrink-0">
+                    <button onClick={handleCareerClick} className="w-full text-center hover:text-white transition-colors">
+                        <strong className="text-cyan-400">Grid Runner Career</strong>
+                        {piUser && (
+                            <>
+                                : <strong className="text-fuchsia-500">@{piUser.username}</strong>
+                            </>
+                        )}
+                    </button>
+                </footer>
             </div>
         </div>
     );

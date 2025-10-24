@@ -80,20 +80,20 @@ const HowToPlayOverlay: React.FC<HowToPlayOverlayProps> = ({ onClose, isRotated,
         };
 
         if (!showBackdrop) {
-            // Use a timeout to prevent the initial click from closing the modal
-            const timerId = setTimeout(() => {
-                document.addEventListener('mousedown', handleClickOutside);
-            }, 0);
+            // This component is shown on a timer, not a click, so no timeout is needed to prevent
+            // the opening click from being caught.
+            // We use 'click' instead of 'mousedown' to ensure it fires on the same event type
+            // as the global audio unlock listener in sounds.ts, making the behavior consistent.
+            document.addEventListener('click', handleClickOutside);
             return () => {
-                clearTimeout(timerId);
-                document.removeEventListener('mousedown', handleClickOutside);
+                document.removeEventListener('click', handleClickOutside);
             };
         }
     }, [onClose, showBackdrop]);
 
     const containerClasses = isRotated
-        ? 'h-full max-h-lg w-auto max-w-[90dvw]'
-        : 'w-full max-w-lg max-h-[90dvh]';
+        ? 'h-auto max-h-[95%] w-auto max-w-[90vh]'
+        : 'h-auto w-full max-w-lg max-h-[90%]';
         
     const backdropClass = showBackdrop ? "bg-black/80 backdrop-blur-md" : "bg-transparent pointer-events-none";
     const modalClass = showBackdrop ? "" : "pointer-events-auto";
@@ -101,6 +101,7 @@ const HowToPlayOverlay: React.FC<HowToPlayOverlayProps> = ({ onClose, isRotated,
     return (
         <div
             className={`fixed inset-0 z-50 flex items-center justify-center font-sans p-4 ${backdropClass}`}
+            onClick={showBackdrop ? onClose : undefined}
             role="dialog"
             aria-modal="true"
             aria-labelledby="how-to-play-title"
@@ -121,7 +122,7 @@ const HowToPlayOverlay: React.FC<HowToPlayOverlayProps> = ({ onClose, isRotated,
                     <section>
                         <h3 className="text-lg font-bold text-cyan-300 mb-3">Interface Controls</h3>
                         <div className="space-y-3">
-                            <InfoItem title="Toggle View" description={<>Switch between <strong>first-person</strong> and <strong>third-person</strong> camera views during gameplay.</>}>
+                            <InfoItem title="Toggle View" description={<>Switch between <strong className="text-cyan-300">first-person</strong> and <strong className="text-cyan-300">third-person</strong> camera views during gameplay.</>}>
                                 <EyeIcon className="w-8 h-8 text-cyan-400" />
                             </InfoItem>
                             <InfoItem title="Audio Settings" description="Toggle game music and sound effects, or open the settings to tune into live radio stations.">
@@ -135,16 +136,21 @@ const HowToPlayOverlay: React.FC<HowToPlayOverlayProps> = ({ onClose, isRotated,
                     </section>
 
                     <section>
+                        <h3 className="text-lg font-bold text-cyan-300 mb-2">Objective</h3>
+                        <p className="text-neutral-300">Navigate the grid, collect nodes to grow your snake and increase your score. Avoid crashing into walls or your own tail!</p>
+                    </section>
+
+                    <section>
                         <h3 className="text-lg font-bold text-cyan-300 mb-3">Core Maneuvers</h3>
                         <div className="space-y-3">
                             <InfoItem title="90° Turn" description="Press once to make a sharp turn.">
                                 <ArrowLeftIcon className="w-8 h-8 text-cyan-400" />
                             </InfoItem>
-                            <InfoItem title="180° Turn" description="Quickly press the same direction twice to make a U-turn.">
+                            <InfoItem title="180° Turn" description={<><strong className="text-cyan-300">Quickly</strong> press the same direction twice to make a U-turn.</>}>
                                 <ArrowLeftIcon className="w-8 h-8 text-cyan-400" />
                                 <ArrowLeftIcon className="w-8 h-8 text-cyan-400" />
                             </InfoItem>
-                            <InfoItem title="Sidestep" description="Quickly press opposite directions to shift one lane over.">
+                            <InfoItem title="Sidestep" description={<><strong className="text-cyan-300">Quickly</strong> press opposite directions to shift one lane over.</>}>
                                 <ArrowLeftIcon className="w-8 h-8 text-cyan-400" />
                                 <ArrowRightIcon className="w-8 h-8 text-cyan-400" />
                             </InfoItem>

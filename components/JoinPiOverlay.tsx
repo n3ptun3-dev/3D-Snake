@@ -1,20 +1,20 @@
 import React from 'react';
 import { XIcon } from './icons';
-import { piService } from '../utils/pi';
 
 interface JoinPiOverlayProps {
     onClose: () => void;
     isRotated: boolean;
+    onOpenExternalUrl: (url: string) => void;
 }
 
-const JoinPiOverlay: React.FC<JoinPiOverlayProps> = ({ onClose, isRotated }) => {
+const JoinPiOverlay: React.FC<JoinPiOverlayProps> = ({ onClose, isRotated, onOpenExternalUrl }) => {
     const containerClasses = isRotated
-        ? 'h-full max-h-lg w-auto max-w-[90dvw]'
-        : 'w-full max-w-lg max-h-[90dvh]';
+        ? 'h-auto max-h-[95%] w-auto max-w-[90vh]'
+        : 'h-auto w-full max-w-lg max-h-[90%]';
 
     const handleJoinClick = (e: React.MouseEvent) => {
         e.preventDefault();
-        piService.openUrl('https://minepi.com/n3ptun3');
+        onOpenExternalUrl('https://minepi.com/n3ptun3');
     };
 
     return (
